@@ -1,0 +1,26 @@
+# Local development overrides. Started by `docker compose up -d` + `mvn spring-boot:run -Dspring-boot.run.profiles=local`.
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pixme
+
+logging:
+  level:
+    app.pixme: DEBUG
+    org.hibernate.SQL: DEBUG
+
+pixme:
+  auth:
+    jwt:
+      secret: local-development-secret-key-that-is-long-enough
+  ai:
+    # `stub` renders a deterministic placeholder character so the full create
+    # flow is testable without burning provider credits.
+    provider: stub
+  push:
+    enabled: false
+  purchase:
+    allow-sandbox: true

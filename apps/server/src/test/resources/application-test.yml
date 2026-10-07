@@ -1,0 +1,39 @@
+# Integration-test profile.
+#
+# Runs against the same Postgres the local docker-compose starts, because the
+# schema relies on Postgres-specific features the product depends on — partial
+# unique indexes (one representative PIXME per day) and DISTINCT ON (last
+# message per conversation). An in-memory H2 would pass while hiding exactly
+# the constraints that matter.
+spring:
+  datasource:
+    url: ${PIXME_TEST_DB_URL:jdbc:postgresql://localhost:5432/pixme_test}
+    username: ${PIXME_DB_USER:pixme}
+    password: ${PIXME_DB_PASSWORD:pixme}
+  flyway:
+    enabled: true
+    clean-disabled: false
+  data:
+    redis:
+      host: ${PIXME_REDIS_HOST:localhost}
+      port: ${PIXME_REDIS_PORT:6379}
+
+pixme:
+  auth:
+    jwt:
+      secret: integration-test-secret-key-long-enough-for-hs256
+  ai:
+    provider: stub
+  push:
+    enabled: false
+  storage:
+    access-key: test
+    secret-key: test-secret
+    endpoint: http://localhost:9000
+  purchase:
+    allow-sandbox: true
+
+logging:
+  level:
+    app.pixme: INFO
+    org.hibernate.SQL: WARN

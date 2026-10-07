@@ -1,0 +1,34 @@
+# Node
+node_modules/
+.expo/
+dist/
+web-build/
+*.log
+npm-debug.*
+yarn-error.*
+
+# Native
+apps/mobile/ios/
+apps/mobile/android/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Java
+target/
+build/
+.gradle/
+*.class
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.iml

@@ -1,0 +1,42 @@
+# Local dependencies for PIXME server development.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pixme
+      POSTGRES_USER: pixme
+      POSTGRES_PASSWORD: pixme
+    ports:
+      - '5432:5432'
+    volumes:
+      - pixme-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pixme']
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      retries: 10
+
+  # S3-compatible storage so the pre-signed upload path works locally.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: pixme
+      MINIO_ROOT_PASSWORD: pixme-local-secret
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - pixme-minio:/data
+
+volumes:
+  pixme-pg:
+  pixme-minio:

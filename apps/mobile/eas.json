@@ -1,0 +1,59 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "base": {
+      "node": "20.18.0",
+      "env": {
+        "PIXME_BUNDLE_ID": "com.pixme.app"
+      }
+    },
+    "development": {
+      "extends": "base",
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "env": {
+        "PIXME_VARIANT": "development",
+        "PIXME_API_BASE_URL": "http://localhost:8080/api/v1",
+        "PIXME_WS_BASE_URL": "ws://localhost:8080/ws"
+      }
+    },
+    "staging": {
+      "extends": "base",
+      "distribution": "internal",
+      "channel": "staging",
+      "env": {
+        "PIXME_VARIANT": "staging",
+        "PIXME_API_BASE_URL": "https://staging-api.pixme.app/api/v1",
+        "PIXME_WS_BASE_URL": "wss://staging-api.pixme.app/ws"
+      },
+      "ios": { "simulator": false },
+      "android": { "buildType": "apk" }
+    },
+    "production": {
+      "extends": "base",
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "PIXME_VARIANT": "production",
+        "PIXME_API_BASE_URL": "https://api.pixme.app/api/v1",
+        "PIXME_WS_BASE_URL": "wss://api.pixme.app/ws"
+      },
+      "android": { "buildType": "app-bundle" }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "language": "ko-KR"
+      },
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft"
+      }
+    }
+  }
+}

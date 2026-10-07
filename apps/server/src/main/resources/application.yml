@@ -1,0 +1,216 @@
+# ---------------------------------------------------------------------------
+# PIXME server — base configuration.
+#
+# Every secret is read from the environment. Nothing in this file may contain
+# a credential: this is the file that ships in the image.
+# ---------------------------------------------------------------------------
+spring:
+  application:
+    name: pixme-server
+
+  datasource:
+    url: ${PIXME_DB_URL:jdbc:postgresql://localhost:5432/pixme}
+    username: ${PIXME_DB_USER:pixme}
+    password: ${PIXME_DB_PASSWORD:pixme}
+    hikari:
+      maximum-pool-size: ${PIXME_DB_POOL_MAX:20}
+      minimum-idle: 4
+      connection-timeout: 10000
+      pool-name: pixme-pool
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema. Hibernate must never alter it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 40
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+        query:
+          in_clause_parameter_padding: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${PIXME_REDIS_HOST:localhost}
+      port: ${PIXME_REDIS_PORT:6379}
+      password: ${PIXME_REDIS_PASSWORD:}
+      timeout: 2s
+
+  jackson:
+    default-property-inclusion: always
+    serialization:
+      write-dates-as-timestamps: false
+      fail-on-empty-beans: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+  servlet:
+    multipart:
+      # Originals are uploaded straight to object storage with a pre-signed
+      # URL, so the API itself never receives a multipart body.
+      max-file-size: 1MB
+      max-request-size: 1MB
+
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  error:
+    include-message: never
+    include-stacktrace: never
+  compression:
+    enabled: true
+    mime-types: application/json
+  tomcat:
+    max-http-form-post-size: 1MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+  health:
+    redis:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    app.pixme: ${PIXME_LOG_LEVEL:INFO}
+    org.hibernate.SQL: WARN
+
+# ---------------------------------------------------------------------------
+# PIXME application settings
+# ---------------------------------------------------------------------------
+pixme:
+  # Service-wide clock. All stored timestamps are UTC; `postDate` (the calendar
+  # day a PIXME belongs to) is resolved in this zone so "today" matches what
+  # Korean users experience.
+  timezone: ${PIXME_TIMEZONE:Asia/Seoul}
+
+  minimum-supported-version: ${PIXME_MIN_APP_VERSION:1.0.0}
+  maintenance:
+    active: ${PIXME_MAINTENANCE:false}
+    message: ${PIXME_MAINTENANCE_MESSAGE:}
+
+  auth:
+    jwt:
+      # HS256 secret, >= 32 bytes. Rotate by deploying a new value; existing
+      # access tokens expire within `access-token-ttl`.
+      secret: ${PIXME_JWT_SECRET:change-me-in-production-at-least-32-bytes}
+      issuer: pixme
+      access-token-ttl: ${PIXME_ACCESS_TOKEN_TTL:PT1H}
+      refresh-token-ttl: ${PIXME_REFRESH_TOKEN_TTL:P60D}
+    apple:
+      client-ids: ${PIXME_APPLE_CLIENT_IDS:com.pixme.app}
+      jwks-uri: https://appleid.apple.com/auth/keys
+      issuer: https://appleid.apple.com
+    kakao:
+      rest-api-key: ${PIXME_KAKAO_REST_API_KEY:}
+      client-secret: ${PIXME_KAKAO_CLIENT_SECRET:}
+      token-uri: https://kauth.kakao.com/oauth/token
+      user-info-uri: https://kapi.kakao.com/v2/user/me
+
+  storage:
+    provider: ${PIXME_STORAGE_PROVIDER:s3}
+    region: ${PIXME_STORAGE_REGION:ap-northeast-2}
+    # Set for Cloudflare R2 or MinIO; leave blank for AWS S3.
+    endpoint: ${PIXME_STORAGE_ENDPOINT:}
+    access-key: ${PIXME_STORAGE_ACCESS_KEY:}
+    secret-key: ${PIXME_STORAGE_SECRET_KEY:}
+    # Private: original photos. Never publicly readable, signed URLs only.
+    originals-bucket: ${PIXME_ORIGINALS_BUCKET:pixme-originals}
+    # Public-read via CDN: generated characters.
+    characters-bucket: ${PIXME_CHARACTERS_BUCKET:pixme-characters}
+    characters-cdn-base-url: ${PIXME_CHARACTERS_CDN:https://cdn.pixme.app}
+    upload-url-ttl: PT10M
+    original-view-url-ttl: PT5M
+
+  ai:
+    # Which PixelImageProvider bean handles generation. Swapping providers is a
+    # config change, never a code change.
+    provider: ${PIXME_AI_PROVIDER:openai}
+    prompt-version: ${PIXME_PROMPT_VERSION:PIXME_V1}
+    request-timeout: PT90S
+    max-attempts: 2
+    openai:
+      api-key: ${PIXME_OPENAI_API_KEY:}
+      base-url: ${PIXME_OPENAI_BASE_URL:https://api.openai.com/v1}
+      analysis-model: ${PIXME_OPENAI_ANALYSIS_MODEL:gpt-5}
+      image-model: ${PIXME_OPENAI_IMAGE_MODEL:gpt-image-1}
+      moderation-model: ${PIXME_OPENAI_MODERATION_MODEL:omni-moderation-latest}
+    flux:
+      api-key: ${PIXME_FLUX_API_KEY:}
+      base-url: ${PIXME_FLUX_BASE_URL:https://api.bfl.ai/v1}
+      image-model: ${PIXME_FLUX_IMAGE_MODEL:flux-kontext-pro}
+
+  generation:
+    # One free generation per calendar day; extras consume a paid credit.
+    free-per-day: 1
+    # Hard cap per day including paid credits — a backstop against runaway
+    # spend from a scripted client.
+    max-per-day: 20
+    # Candidates kept per day before older unpublished ones are pruned.
+    max-candidates-per-day: 10
+
+  feed:
+    page-size: 10
+    # An author may appear at most this often in one user's feed per day.
+    max-exposures-per-author-per-day: 2
+    # Share of the feed reserved for accounts created in the last 7 days.
+    new-user-quota: 0.2
+
+  square:
+    page-size: 40
+    canvas-width: 1000
+    canvas-height: 1400
+    # Minimum distance between two characters, in canvas units.
+    min-separation: 92
+    curation-size: 8
+
+  push:
+    expo-api-url: https://exp.host/--/api/v2/push/send
+    expo-access-token: ${PIXME_EXPO_ACCESS_TOKEN:}
+    enabled: ${PIXME_PUSH_ENABLED:true}
+
+  purchase:
+    apple:
+      bundle-id: ${PIXME_APPLE_BUNDLE_ID:com.pixme.app}
+      issuer-id: ${PIXME_APPLE_ISSUER_ID:}
+      key-id: ${PIXME_APPLE_KEY_ID:}
+      private-key: ${PIXME_APPLE_PRIVATE_KEY:}
+      root-certificates-path: ${PIXME_APPLE_ROOT_CERTS:}
+    google:
+      package-name: ${PIXME_GOOGLE_PACKAGE_NAME:com.pixme.app}
+      service-account-json: ${PIXME_GOOGLE_SERVICE_ACCOUNT_JSON:}
+    # In non-production environments, accept sandbox receipts.
+    allow-sandbox: ${PIXME_ALLOW_SANDBOX_RECEIPTS:false}
+
+  privacy:
+    # Originals of users who opted out are deleted immediately after
+    # generation; the rest are retained for this long, then purged.
+    original-retention: ${PIXME_ORIGINAL_RETENTION:P180D}
+    # Grace period between account deletion and the hard purge.
+    deletion-grace-period: ${PIXME_DELETION_GRACE:P7D}
+
+  rate-limit:
+    generation-per-hour: 10
+    heart-per-minute: 60
+    connect-per-hour: 60
+    message-per-minute: 60
+    report-per-day: 20

@@ -1,0 +1,14 @@
+{
+  "name": "pixme",
+  "private": true,
+  "description": "PIXME — 오늘의 나를 픽셀로.",
+  "scripts": {
+    "mobile": "npm --prefix apps/mobile run start",
+    "mobile:typecheck": "npm --prefix apps/mobile run typecheck",
+    "server": "cd apps/server && mvn spring-boot:run -Dspring-boot.run.profiles=local",
+    "server:test": "cd apps/server && mvn -B test",
+    "deps:up": "cd apps/server && docker compose up -d",
+    "deps:down": "cd apps/server && docker compose down",
+    "verify": "npm run mobile:typecheck && npm run server:test"
+  }
+}
