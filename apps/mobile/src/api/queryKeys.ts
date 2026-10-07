@@ -22,12 +22,20 @@ export const qk = {
     today: (scene?: string) => ['square', 'today', scene ?? 'auto'] as const,
   },
   pixels: {
-    mine: () => ['pixels', 'mine'] as const,
-    detail: (postId: string) => ['pixels', 'detail', postId] as const,
-    original: (postId: string) => ['pixels', 'original', postId] as const,
+    collection: () => ['pixels', 'collection'] as const,
     generation: (generationId: string) =>
       ['pixels', 'generation', generationId] as const,
-    byUser: (userId: string) => ['pixels', 'user', userId] as const,
+    candidates: (generationId: string) =>
+      ['pixels', 'candidates', generationId] as const,
+    original: (characterId: string) =>
+      ['pixels', 'original', characterId] as const,
+  },
+  dailyStatus: {
+    mine: () => ['dailyStatus', 'mine'] as const,
+    history: () => ['dailyStatus', 'history'] as const,
+    detail: (dailyStatusId: string) =>
+      ['dailyStatus', 'detail', dailyStatusId] as const,
+    byUser: (userId: string) => ['dailyStatus', 'user', userId] as const,
   },
   users: {
     profile: (userId: string) => ['users', 'profile', userId] as const,

@@ -12,6 +12,7 @@ import { MOCK_MODE } from '@/lib/mock';
 import { authApi as realAuthApi } from './endpoints/auth';
 import { usersApi as realUsersApi } from './endpoints/users';
 import { pixelsApi as realPixelsApi } from './endpoints/pixels';
+import { dailyStatusApi as realDailyStatusApi } from './endpoints/dailyStatus';
 import { squareApi as realSquareApi } from './endpoints/square';
 import { reactionsApi as realReactionsApi } from './endpoints/reactions';
 import { connectionsApi as realConnectionsApi } from './endpoints/connections';
@@ -25,6 +26,7 @@ import {
   mockAuthApi,
   mockUsersApi,
   mockPixelsApi,
+  mockDailyStatusApi,
   mockSquareApi,
   mockReactionsApi,
   mockConnectionsApi,
@@ -43,6 +45,7 @@ import {
 export const authApi = MOCK_MODE ? mockAuthApi : realAuthApi;
 export const usersApi = MOCK_MODE ? mockUsersApi : realUsersApi;
 export const pixelsApi = MOCK_MODE ? mockPixelsApi : realPixelsApi;
+export const dailyStatusApi = MOCK_MODE ? mockDailyStatusApi : realDailyStatusApi;
 export const squareApi = MOCK_MODE ? mockSquareApi : realSquareApi;
 export const reactionsApi = MOCK_MODE ? mockReactionsApi : realReactionsApi;
 export const connectionsApi = MOCK_MODE ? mockConnectionsApi : realConnectionsApi;

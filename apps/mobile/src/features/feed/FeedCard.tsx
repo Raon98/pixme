@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 
-import type { PixelPost } from '@/api';
+import type { DailyStatusEntry } from '@/api';
 import { copy } from '@/constants/copy';
 import { moodEmoji, moodLabel } from '@/constants/moods';
 import { formatTag } from '@/constants/tags';
@@ -23,7 +23,7 @@ import { useConnectionRequest } from '../connections/useConnectionRequest';
 import { useHeart } from '../reactions/useHeart';
 
 export interface FeedCardProps {
-  post: PixelPost;
+  status: DailyStatusEntry;
   /** Card height, set by the pager so each card fills exactly one page. */
   height: number;
   /** True while this card is the visible page — gates the idle animation. */
@@ -37,7 +37,7 @@ export interface FeedCardProps {
  * neutral and has no "reject" semantics, so there is no dislike affordance
  * anywhere on this card. The only outgoing signals are ♡ and 👋.
  */
-export function FeedCard({ post, height, active }: FeedCardProps) {
+export function FeedCard({ status, height, active }: FeedCardProps) {
   const { colors } = useTheme();
   const router = useRouter();
   const toast = useToast();
@@ -52,12 +52,12 @@ export function FeedCard({ post, height, active }: FeedCardProps) {
     [height],
   );
 
-  const waveState = post.author.connectionStatus;
+  const waveState = status.author.connectionStatus;
   const waveSent =
     waveState === 'REQUESTED_BY_ME' || waveState === 'CONNECTED';
 
   const onHeart = useCallback(() => {
-    const next = toggleHeart(post);
+    const next = toggleHeart(status);
     if (next) {
       setBurst((value) => value + 1);
       toast.show({
@@ -66,7 +66,7 @@ export function FeedCard({ post, height, active }: FeedCardProps) {
         icon: 'heart-filled',
       });
     }
-  }, [post, toggleHeart, toast]);
+  }, [status, toggleHeart, toast]);
 
   const onWave = useCallback(() => {
     if (waveSent) {
@@ -75,7 +75,7 @@ export function FeedCard({ post, height, active }: FeedCardProps) {
     }
 
     connectionRequest.mutate(
-      { userId: post.author.id },
+      { userId: status.author.id },
       {
         onSuccess: (response) => {
           if (response.connection) {
@@ -93,12 +93,12 @@ export function FeedCard({ post, height, active }: FeedCardProps) {
         },
       },
     );
-  }, [connectionRequest, post.author.id, router, toast, waveSent]);
+  }, [connectionRequest, status.author.id, router, toast, waveSent]);
 
   const openProfile = useCallback(() => {
-    analytics.track('SQUARE_PROFILE_OPENED', { targetUserId: post.author.id });
-    router.push(`/user/${post.author.id}`);
-  }, [post.author.id, router]);
+    analytics.track('SQUARE_PROFILE_OPENED', { targetUserId: status.author.id });
+    router.push(`/user/${status.author.id}`);
+  }, [status.author.id, router]);
 
   return (
     <View style={[styles.page, { height }]}>
@@ -119,35 +119,35 @@ export function FeedCard({ post, height, active }: FeedCardProps) {
         <Pressable
           onPress={openProfile}
           accessibilityRole="button"
-          accessibilityLabel={`${post.author.nickname}의 프로필 열기`}
+          accessibilityLabel={`${status.author.nickname}의 프로필 열기`}
           style={({ pressed }) => [
             styles.header,
             pressed ? { opacity: opacity.pressed } : null,
           ]}
         >
           <Avatar
-            uri={post.author.representativeCharacterUrl}
-            nickname={post.author.nickname}
+            uri={status.author.representativeCharacterUrl}
+            nickname={status.author.nickname}
             size={34}
             ring={
-              post.author.connectionStatus === 'CONNECTED'
+              status.author.connectionStatus === 'CONNECTED'
                 ? 'connection'
                 : 'none'
             }
           />
           <View style={styles.headerText}>
             <Text variant="bodyStrong" numberOfLines={1}>
-              @{post.author.nickname}
+              @{status.author.nickname}
             </Text>
             <Text variant="micro" tone="tertiary">
-              {formatRelative(post.createdAt)}
+              {formatRelative(status.createdAt)}
             </Text>
           </View>
-          {post.heartCount > 0 ? (
+          {status.heartCount > 0 ? (
             <View style={styles.heartCount}>
               <Icon name="heart-filled" size={13} color={colors.heart} />
               <Text variant="micro" tone="secondary" style={styles.heartCountText}>
-                {formatCount(post.heartCount)}
+                {formatCount(status.heartCount)}
               </Text>
             </View>
           ) : null}
@@ -156,38 +156,38 @@ export function FeedCard({ post, height, active }: FeedCardProps) {
         {/* character stage */}
         <View style={styles.characterArea}>
           <PixelCharacter
-            uri={post.characterImageUrl}
+            uri={status.characterImageUrl}
             size={characterSize}
             idle={active}
-            idleVariant={post.id.charCodeAt(0) % 3}
+            idleVariant={status.id.charCodeAt(0) % 3}
             priority={active ? 'high' : 'normal'}
-            accessibilityLabel={`${post.author.nickname}의 오늘의 PIXME`}
+            accessibilityLabel={`${status.author.nickname}의 오늘의 PIXME`}
           />
           <HeartBurst trigger={burst} />
         </View>
 
         {/* caption / mood / tags */}
         <View style={styles.meta}>
-          {post.caption ? (
+          {status.message ? (
             <Text variant="callout" align="center" numberOfLines={2}>
-              “{post.caption}”
+              “{status.message}”
             </Text>
           ) : null}
 
-          {post.mood ? (
+          {status.mood ? (
             <Text
               variant="title2"
               align="center"
               style={styles.mood}
-              accessibilityLabel={`기분 ${moodLabel(post.mood)}`}
+              accessibilityLabel={`기분 ${moodLabel(status.mood)}`}
             >
-              {moodEmoji(post.mood)}
+              {moodEmoji(status.mood)}
             </Text>
           ) : null}
 
-          {post.tags.length > 0 ? (
+          {status.tags.length > 0 ? (
             <View style={styles.tags}>
-              {post.tags.map((tag) => (
+              {status.tags.map((tag) => (
                 <Text key={tag} variant="caption" tone="accent" style={styles.tag}>
                   {formatTag(tag)}
                 </Text>
@@ -200,10 +200,10 @@ export function FeedCard({ post, height, active }: FeedCardProps) {
         <View style={styles.actions}>
           <ActionButton
             label={copy.reactions.heart}
-            icon={post.heartedByMe ? 'heart-filled' : 'heart'}
-            color={post.heartedByMe ? colors.heart : colors.textSecondary}
+            icon={status.heartedByMe ? 'heart-filled' : 'heart'}
+            color={status.heartedByMe ? colors.heart : colors.textSecondary}
             backgroundColor={
-              post.heartedByMe ? colors.heartSubtle : colors.surface
+              status.heartedByMe ? colors.heartSubtle : colors.surface
             }
             onPress={onHeart}
           />

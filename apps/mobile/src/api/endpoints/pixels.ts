@@ -1,14 +1,10 @@
 import { del, get, post } from '../client';
 import type {
-  MyPixelPost,
-  Page,
+  KeepGenerationRequest,
+  PixelCharacter,
   PixelGeneration,
-  PixelPost,
-  PixelPostSummary,
-  PublishPixelRequest,
   RetryGenerationRequest,
   StartGenerationRequest,
-  TodayStatus,
   UploadTicket,
 } from '../types';
 
@@ -41,43 +37,29 @@ export const pixelsApi = {
   generation: (generationId: string) =>
     get<PixelGeneration>(`/pixels/generations/${generationId}`),
 
-  /** Step 4 — publish the chosen candidate as today's representative post. */
-  publish: (generationId: string, body: PublishPixelRequest) =>
-    post<PixelPost>(`/pixels/${generationId}/publish`, body),
+  /**
+   * Step 4 — confirms a candidate as an owned character. The AI call was
+   * already paid for regardless of this call's outcome; this only decides
+   * whether it joins the Collection and becomes the Current PIXME.
+   */
+  keep: (generationId: string, body: KeepGenerationRequest) =>
+    post<PixelCharacter>(`/pixels/generations/${generationId}/keep`, body),
 
-  /** What the user still needs to do today — drives the create-button badge. */
-  todayStatus: () => get<TodayStatus>('/pixels/today-status'),
+  /** The PIXME Collection — every confirmed character, newest first. */
+  collection: () => get<PixelCharacter[]>('/pixels/characters'),
 
-  /** The vertical "오늘" feed. Cursor-paginated and server-ranked. */
-  todayFeed: (cursor?: string | null, limit = 10) =>
-    get<Page<PixelPost>>('/pixels/today', {
-      params: { cursor: cursor ?? undefined, limit },
-    }),
+  /** Free — never calls a provider. Switches among owned characters. */
+  setCurrent: (characterId: string) =>
+    post<PixelCharacter>(`/pixels/characters/${characterId}/set-current`),
 
-  /** Owner's own history (includes the private original reference). */
-  myPixels: (cursor?: string | null, limit = 30) =>
-    get<Page<MyPixelPost>>('/pixels/me', {
-      params: { cursor: cursor ?? undefined, limit },
-    }),
-
-  detail: (postId: string) => get<PixelPost>(`/pixels/${postId}`),
-
-  myDetail: (postId: string) => get<MyPixelPost>(`/pixels/me/${postId}`),
+  deleteCharacter: (characterId: string) =>
+    del<void>(`/pixels/characters/${characterId}`),
 
   /** Short-lived signed URL. Owner only; never cached to disk. */
-  originalUrl: (postId: string) =>
-    get<{ url: string; expiresAt: string }>(`/pixels/${postId}/original`),
+  originalUrl: (characterId: string) =>
+    get<{ url: string; expiresAt: string }>(`/pixels/characters/${characterId}/original`),
 
-  /** Deletes the stored original but keeps the character + post. */
-  deleteOriginal: (postId: string) => del<void>(`/pixels/${postId}/original`),
-
-  /** Removes a post from the public feed; stays in the owner's history. */
-  unpublish: (postId: string) => post<PixelPost>(`/pixels/${postId}/unpublish`),
-
-  deletePost: (postId: string) => del<void>(`/pixels/${postId}`),
-
-  userPixels: (userId: string, cursor?: string | null, limit = 30) =>
-    get<Page<PixelPostSummary>>(`/users/${userId}/pixels`, {
-      params: { cursor: cursor ?? undefined, limit },
-    }),
+  /** Deletes the stored original but keeps the character. */
+  deleteOriginal: (characterId: string) =>
+    del<void>(`/pixels/characters/${characterId}/original`),
 };

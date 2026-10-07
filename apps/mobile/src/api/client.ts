@@ -171,6 +171,15 @@ export async function patch<T>(
   return response.data;
 }
 
+export async function put<T>(
+  url: string,
+  body?: unknown,
+  options?: RequestOptions,
+): Promise<T> {
+  const response = await http.put<T>(url, body, options);
+  return response.data;
+}
+
 export async function del<T>(
   url: string,
   options?: RequestOptions,

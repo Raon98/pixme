@@ -34,7 +34,7 @@ export default function SquareRoute() {
   const [selected, setSelected] = useState<
     Pick<
       SquareOccupant,
-      'postId' | 'userId' | 'nickname' | 'characterImageUrl' | 'mood'
+      'dailyStatusId' | 'userId' | 'nickname' | 'characterImageUrl' | 'mood'
     > | null
   >(null);
 

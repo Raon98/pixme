@@ -36,7 +36,7 @@ export function CurationRail({
       >
         {curation.entries.map((entry) => (
           <Pressable
-            key={entry.postId}
+            key={entry.userId}
             accessibilityRole="button"
             accessibilityLabel={`${entry.nickname}의 PIXME 보기`}
             onPress={() => onSelect(entry)}

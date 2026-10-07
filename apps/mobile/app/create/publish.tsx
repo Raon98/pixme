@@ -3,7 +3,6 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { errorMessage } from '@/api/errors';
-import { ApiErrorCode, toApiError } from '@/api/errors';
 import { copy } from '@/constants/copy';
 import { MOODS } from '@/constants/moods';
 import { normalizeTag, SUGGESTED_TAGS } from '@/constants/tags';
@@ -12,7 +11,6 @@ import { opacity, radius, spacing, useTheme } from '@/theme';
 import {
   Button,
   Chip,
-  ConfirmDialog,
   Header,
   PixelCharacter,
   Screen,
@@ -21,17 +19,20 @@ import {
   useToast,
 } from '@/ui';
 import { useGenerationStore } from '@/features/generation/generationStore';
-import { usePublishPixel } from '@/features/generation/usePublishPixel';
-import { useTodayStatus } from '@/features/feed/useTodayFeed';
+import { useKeepGeneration } from '@/features/generation/useKeepGeneration';
+import { useUpsertDailyStatus } from '@/features/dailyStatus/useUpsertDailyStatus';
 import { usePushRegistration } from '@/features/notifications/useNotifications';
 
 /**
- * Publish today's PIXME.
+ * Keep the new PIXME as Current, and optionally leave today's status.
  *
- * Caption, mood and tags are all optional — the character alone is a complete
- * post. We ask for push permission *here*, right after the first publish,
- * because "someone reacted to your PIXME" is now a concrete thing the user
- * wants rather than an abstract permission prompt at launch.
+ * <p>Mood, message and tags are all optional — the character alone is a
+ * complete Current PIXME switch. Unlike the old one-post-per-day model, this
+ * never asks to "replace" anything: generating and keeping a new look is
+ * always allowed, any number of times, because only the AI call itself was
+ * ever paid for. We ask for push permission *here*, right after the first
+ * keep, because "someone reacted to your PIXME" is now a concrete thing the
+ * user wants rather than an abstract permission prompt at launch.
  */
 export default function PublishRoute() {
   const router = useRouter();
@@ -46,15 +47,14 @@ export default function PublishRoute() {
   const setMood = useGenerationStore((state) => state.setMood);
   const toggleTag = useGenerationStore((state) => state.toggleTag);
 
-  const publish = usePublishPixel();
-  const todayStatus = useTodayStatus();
+  const keep = useKeepGeneration();
+  const upsertStatus = useUpsertDailyStatus();
   const { promptNow } = usePushRegistration();
 
   const [customTag, setCustomTag] = useState('');
-  const [replacePrompt, setReplacePrompt] = useState(false);
 
   const generation = draft?.generation ?? null;
-  const alreadyPublishedToday = !!todayStatus.data?.myTodayPost;
+  const isPending = keep.isPending || upsertStatus.isPending;
 
   const suggestions = useMemo(() => {
     // Show selected custom tags alongside the suggestions so they stay
@@ -63,48 +63,34 @@ export default function PublishRoute() {
     return [...extras, ...SUGGESTED_TAGS];
   }, [tags]);
 
-  const doPublish = useCallback(
-    async (replaceRepresentative: boolean) => {
-      if (!generation) return;
-      try {
-        await publish.mutateAsync({
-          generationId: generation.id,
-          body: {
-            caption: caption.trim() || null,
-            mood,
-            tags,
-            replaceRepresentative,
-          },
-        });
+  const onSubmit = useCallback(async () => {
+    if (!generation) return;
+    try {
+      const character = await keep.mutateAsync({
+        generationId: generation.id,
+        body: { asCurrent: true, keepOriginal: true, label: null },
+      });
 
-        // First-publish moment: ask for notifications now.
-        await promptNow();
+      await upsertStatus.mutateAsync({
+        mood,
+        message: caption.trim() || null,
+        tags,
+        pixelCharacterId: character.id,
+      });
 
-        toast.show({
-          message: copy.publish.successTitle,
-          tone: 'success',
-          icon: 'sparkle',
-        });
-        router.replace('/(tabs)');
-      } catch (error) {
-        const apiError = toApiError(error);
-        if (apiError.code === ApiErrorCode.AlreadyPublishedToday) {
-          setReplacePrompt(true);
-          return;
-        }
-        toast.show({ message: errorMessage(error), tone: 'error' });
-      }
-    },
-    [caption, generation, mood, promptNow, publish, router, tags, toast],
-  );
+      // First-keep moment: ask for notifications now.
+      await promptNow();
 
-  const onSubmit = useCallback(() => {
-    if (alreadyPublishedToday) {
-      setReplacePrompt(true);
-      return;
+      toast.show({
+        message: copy.publish.successTitle,
+        tone: 'success',
+        icon: 'sparkle',
+      });
+      router.replace('/(tabs)');
+    } catch (error) {
+      toast.show({ message: errorMessage(error), tone: 'error' });
     }
-    void doPublish(false);
-  }, [alreadyPublishedToday, doPublish]);
+  }, [caption, generation, keep, mood, promptNow, router, tags, toast, upsertStatus]);
 
   const addCustomTag = useCallback(() => {
     const normalized = normalizeTag(customTag);
@@ -135,142 +121,126 @@ export default function PublishRoute() {
   }
 
   return (
-    <>
-      <Screen
-        footer={
-          <Button
-            label={copy.publish.cta}
-            loading={publish.isPending}
-            onPress={onSubmit}
-          />
-        }
-      >
-        <Header title={copy.publish.title} onBack={() => router.back()} />
+    <Screen
+      footer={
+        <Button
+          label={copy.publish.cta}
+          loading={isPending}
+          onPress={() => void onSubmit()}
+        />
+      }
+    >
+      <Header title={copy.publish.title} onBack={() => router.back()} />
 
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.content}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.content}
+      >
+        <View
+          style={[
+            styles.stage,
+            { backgroundColor: colors.stage, borderColor: colors.border },
+          ]}
         >
-          <View
-            style={[
-              styles.stage,
-              { backgroundColor: colors.stage, borderColor: colors.border },
-            ]}
-          >
-            <PixelCharacter
-              uri={generation.characterImageUrl}
-              size={150}
-              idle
-              accessibilityLabel="게시할 내 PIXME"
-            />
+          <PixelCharacter
+            uri={generation.characterImageUrl}
+            size={150}
+            idle
+            accessibilityLabel="오늘의 Current PIXME"
+          />
+        </View>
+
+        <TextField
+          label={copy.publish.captionLabel}
+          value={caption}
+          onChangeText={setCaption}
+          placeholder={copy.publish.captionPlaceholder}
+          maxLength={config.rules.maxCaptionLength}
+          showCounter
+          containerStyle={styles.section}
+        />
+
+        <View style={styles.section}>
+          <Text variant="label" tone="secondary">
+            {copy.publish.moodLabel}
+          </Text>
+          <View style={styles.moods}>
+            {MOODS.map((item) => {
+              const selected = mood === item.code;
+              return (
+                <Chip
+                  key={item.code}
+                  label={item.label}
+                  prefix={item.emoji}
+                  selected={selected}
+                  size="sm"
+                  style={styles.chip}
+                  onPress={() => setMood(selected ? null : item.code)}
+                />
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text variant="label" tone="secondary">
+            {copy.publish.tagLabel}
+          </Text>
+          <Text variant="micro" tone="tertiary" style={styles.tagHint}>
+            {copy.publish.tagHint}
+          </Text>
+
+          <View style={styles.tags}>
+            {suggestions.map((tag) => {
+              const selected = tags.includes(tag);
+              return (
+                <Chip
+                  key={tag}
+                  label={`#${tag}`}
+                  selected={selected}
+                  size="sm"
+                  style={styles.chip}
+                  disabled={
+                    !selected && tags.length >= config.rules.maxTagsPerPost
+                  }
+                  onPress={() => toggleTag(tag, config.rules.maxTagsPerPost)}
+                />
+              );
+            })}
           </View>
 
           <TextField
-            label={copy.publish.captionLabel}
-            value={caption}
-            onChangeText={setCaption}
-            placeholder={copy.publish.captionPlaceholder}
-            maxLength={config.rules.maxCaptionLength}
-            showCounter
-            containerStyle={styles.section}
+            value={customTag}
+            onChangeText={setCustomTag}
+            placeholder="직접 입력"
+            maxLength={12}
+            autoCapitalize="none"
+            returnKeyType="done"
+            onSubmitEditing={addCustomTag}
+            containerStyle={styles.customTag}
+            right={
+              <Text
+                variant="label"
+                tone="accent"
+                onPress={addCustomTag}
+                style={[
+                  styles.addTag,
+                  {
+                    opacity:
+                      tags.length >= config.rules.maxTagsPerPost
+                        ? opacity.disabled
+                        : 1,
+                  },
+                ]}
+              >
+                추가
+              </Text>
+            }
           />
-
-          <View style={styles.section}>
-            <Text variant="label" tone="secondary">
-              {copy.publish.moodLabel}
-            </Text>
-            <View style={styles.moods}>
-              {MOODS.map((item) => {
-                const selected = mood === item.code;
-                return (
-                  <Chip
-                    key={item.code}
-                    label={item.label}
-                    prefix={item.emoji}
-                    selected={selected}
-                    size="sm"
-                    style={styles.chip}
-                    onPress={() => setMood(selected ? null : item.code)}
-                  />
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text variant="label" tone="secondary">
-              {copy.publish.tagLabel}
-            </Text>
-            <Text variant="micro" tone="tertiary" style={styles.tagHint}>
-              {copy.publish.tagHint}
-            </Text>
-
-            <View style={styles.tags}>
-              {suggestions.map((tag) => {
-                const selected = tags.includes(tag);
-                return (
-                  <Chip
-                    key={tag}
-                    label={`#${tag}`}
-                    selected={selected}
-                    size="sm"
-                    style={styles.chip}
-                    disabled={
-                      !selected && tags.length >= config.rules.maxTagsPerPost
-                    }
-                    onPress={() => toggleTag(tag, config.rules.maxTagsPerPost)}
-                  />
-                );
-              })}
-            </View>
-
-            <TextField
-              value={customTag}
-              onChangeText={setCustomTag}
-              placeholder="직접 입력"
-              maxLength={12}
-              autoCapitalize="none"
-              returnKeyType="done"
-              onSubmitEditing={addCustomTag}
-              containerStyle={styles.customTag}
-              right={
-                <Text
-                  variant="label"
-                  tone="accent"
-                  onPress={addCustomTag}
-                  style={[
-                    styles.addTag,
-                    {
-                      opacity:
-                        tags.length >= config.rules.maxTagsPerPost
-                          ? opacity.disabled
-                          : 1,
-                    },
-                  ]}
-                >
-                  추가
-                </Text>
-              }
-            />
-          </View>
-        </ScrollView>
-      </Screen>
-
-      <ConfirmDialog
-        visible={replacePrompt}
-        title={copy.publish.replaceTitle}
-        body={copy.publish.replaceBody}
-        confirmLabel={copy.publish.replaceConfirm}
-        cancelLabel={copy.publish.replaceCancel}
-        loading={publish.isPending}
-        onConfirm={() => {
-          setReplacePrompt(false);
-          void doPublish(true);
-        }}
-        onCancel={() => setReplacePrompt(false)}
-      />
-    </>
+        </View>
+      </ScrollView>
+    </Screen>
   );
 }
 

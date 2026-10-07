@@ -87,7 +87,7 @@ export function SquareCanvas({
 
         {occupants.map((occupant) => (
           <Occupant
-            key={occupant.postId}
+            key={occupant.userId}
             occupant={occupant}
             scale={scale(occupant.depth)}
             onPress={() => onSelectOccupant(occupant)}

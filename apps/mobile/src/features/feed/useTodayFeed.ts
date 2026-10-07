@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
-import { pixelsApi, qk, type Page, type PixelPost } from '@/api';
+import { dailyStatusApi, qk, type DailyStatusEntry, type Page } from '@/api';
 import { config } from '@/lib/config';
 
 /**
@@ -12,10 +12,10 @@ import { config } from '@/lib/config';
  * can tune discovery without an app release.
  */
 export function useTodayFeed() {
-  return useInfiniteQuery<Page<PixelPost>, Error>({
+  return useInfiniteQuery<Page<DailyStatusEntry>, Error>({
     queryKey: qk.feed.today(),
     queryFn: ({ pageParam }) =>
-      pixelsApi.todayFeed(
+      dailyStatusApi.todayFeed(
         pageParam as string | null,
         config.rules.feedPageSize,
       ),
@@ -30,20 +30,20 @@ export function useTodayFeed() {
 
 /** Flattens pages for the virtualized list. */
 export function flattenFeed(
-  data: { pages: Page<PixelPost>[] } | undefined,
-): PixelPost[] {
+  data: { pages: Page<DailyStatusEntry>[] } | undefined,
+): DailyStatusEntry[] {
   if (!data) return [];
   return data.pages.flatMap((page) => page.items);
 }
 
 /**
- * Whether the user still needs to make today's PIXME. Drives the create-tab
- * badge, the feed's "make yours" prompt and the daily reminder suppression.
+ * Today's own status plus the free generation allowance. Drives the create-tab
+ * badge, the feed's "오늘 상태 남기기" prompt and the daily reminder suppression.
  */
 export function useTodayStatus() {
   return useQuery({
     queryKey: qk.feed.status(),
-    queryFn: () => pixelsApi.todayStatus(),
+    queryFn: () => dailyStatusApi.myToday(),
     staleTime: 60_000,
   });
 }

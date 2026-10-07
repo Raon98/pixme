@@ -31,6 +31,7 @@ export default function PrivacySettingsRoute() {
   const updateMe = useUpdateMe();
 
   const keepOriginal = me.data?.settings.keepOriginalPhoto ?? true;
+  const squareVisible = me.data?.settings.squareVisible ?? false;
 
   const onToggle = useCallback(
     (next: boolean) => {
@@ -52,9 +53,44 @@ export default function PrivacySettingsRoute() {
     [toast, updateMe],
   );
 
+  const onToggleSquareVisible = useCallback(
+    (next: boolean) => {
+      updateMe.mutate(
+        { settings: { squareVisible: next } },
+        {
+          onSuccess: () =>
+            toast.show({
+              message: next
+                ? '오늘 활동하면 광장에 나타나요.'
+                : '더 이상 광장에 나타나지 않아요.',
+              tone: 'success',
+            }),
+          onError: () =>
+            toast.show({ message: copy.errors.generic, tone: 'error' }),
+        },
+      );
+    },
+    [toast, updateMe],
+  );
+
   return (
     <Screen edges={['top']} scroll>
       <Header title="개인정보" />
+
+      <SectionHeader title="광장" />
+      <ListRow
+        title="오늘 광장에 표시"
+        subtitle="켜두면 오늘 활동할 때 광장에 내 Current PIXME가 나타나요. 끄면 앱은 평소처럼 쓸 수 있고, 광장에만 보이지 않아요."
+        showChevron={false}
+        right={
+          <Toggle
+            label="오늘 광장에 표시"
+            value={squareVisible}
+            disabled={!me.data || updateMe.isPending}
+            onChange={onToggleSquareVisible}
+          />
+        }
+      />
 
       <SectionHeader title="사진" />
       <ListRow

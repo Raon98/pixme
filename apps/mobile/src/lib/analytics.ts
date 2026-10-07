@@ -18,7 +18,8 @@ export const AnalyticsEvent = {
   PixelGenerationCompleted: 'PIXEL_GENERATION_COMPLETED',
   PixelGenerationFailed: 'PIXEL_GENERATION_FAILED',
   PixelGenerationRetry: 'PIXEL_GENERATION_RETRY',
-  PixelPublished: 'PIXEL_PUBLISHED',
+  PixelKept: 'PIXEL_KEPT',
+  DailyStatusUpdated: 'DAILY_STATUS_UPDATED',
 
   FeedCardViewed: 'FEED_CARD_VIEWED',
   HeartSent: 'HEART_SENT',

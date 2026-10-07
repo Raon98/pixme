@@ -3,9 +3,9 @@ import type { HeartResponse } from '../types';
 
 export const reactionsApi = {
   /** Idempotent: hearting twice is a no-op, matching the "no double heart" rule. */
-  sendHeart: (postId: string) =>
-    post<HeartResponse>(`/pixels/${postId}/heart`),
+  sendHeart: (dailyStatusId: string) =>
+    post<HeartResponse>(`/daily-status/${dailyStatusId}/heart`),
 
-  removeHeart: (postId: string) =>
-    del<HeartResponse>(`/pixels/${postId}/heart`),
+  removeHeart: (dailyStatusId: string) =>
+    del<HeartResponse>(`/daily-status/${dailyStatusId}/heart`),
 };

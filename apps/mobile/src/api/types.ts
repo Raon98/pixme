@@ -122,6 +122,10 @@ export interface UserSettings {
   pushDailyReminder: boolean;
   /** When false the server deletes the original photo after generation. */
   keepOriginalPhoto: boolean;
+  /** Opt-in: being active today can place this user in the square. */
+  squareVisible: boolean;
+  /** Whether the one-time square visibility explanation has been shown. */
+  squareOnboarded: boolean;
 }
 
 export interface UpdateMeRequest {
@@ -144,8 +148,8 @@ export interface PublicProfile {
   bio: string | null;
   interests: string[];
   representativeCharacterUrl: string | null;
-  todayPost: PixelPost | null;
-  recentPosts: PixelPostSummary[];
+  todayStatus: DailyStatusEntry | null;
+  recentStatuses: DailyStatusSummary[];
   stats: { receivedHeartCount: number; pixelCount: number };
   relation: UserRelation;
 }
@@ -155,7 +159,7 @@ export interface UserRelation {
   connectionStatus: ConnectionStatus;
   /** Set when a conversation already exists. */
   conversationId: string | null;
-  heartedTodayPost: boolean;
+  heartedTodayStatus: boolean;
   blockedByMe: boolean;
 }
 
@@ -177,7 +181,6 @@ export type GenerationStatus =
   | 'FAILED'
   | 'REJECTED_UNSAFE';
 
-export type PixelVisibility = 'PUBLIC' | 'PRIVATE';
 
 export type SpendKind =
   | 'FREE_FIRST'
@@ -236,21 +239,25 @@ export interface UploadTicket {
   expiresAt: string;
 }
 
-export interface PixelPost {
+/**
+ * Confirms a generation result as an owned character — the only moment one
+ * is added to the Collection. `asCurrent` additionally repoints the user's
+ * Current PIXME and, if today has a status row, marks it fresh.
+ */
+export interface KeepGenerationRequest {
+  asCurrent: boolean;
+  keepOriginal: boolean;
+  label?: string | null;
+}
+
+/** One entry in the Collection — a confirmed, owned character. */
+export interface PixelCharacter {
   id: string;
-  author: PostAuthor;
   characterImageUrl: string;
-  caption: string | null;
-  mood: string | null;
-  tags: string[];
   style: PixelStyle;
-  visibility: PixelVisibility;
-  heartCount: number;
-  /** Whether the current viewer has hearted this post. */
-  heartedByMe: boolean;
-  /** Calendar date (YYYY-MM-DD) this post represents. */
-  postDate: string;
-  isRepresentative: boolean;
+  label: string | null;
+  isCurrent: boolean;
+  hasOriginal: boolean;
   createdAt: string;
 }
 
@@ -261,39 +268,63 @@ export interface PostAuthor {
   connectionStatus: ConnectionStatus;
 }
 
-/** Compact form used in grids. */
-export interface PixelPostSummary {
+/**
+ * "오늘의 상태" — free, daily, and independent of generating anything new.
+ * `characterImageUrl` is a live snapshot of whatever Current PIXME pointed
+ * at when this row was last touched; it freezes once the day is over.
+ */
+export interface DailyStatusEntry {
   id: string;
-  characterImageUrl: string;
-  postDate: string;
+  author: PostAuthor;
+  characterImageUrl: string | null;
+  mood: string | null;
+  message: string | null;
+  tags: string[];
+  heartCount: number;
+  /** Whether the current viewer has hearted this status. */
+  heartedByMe: boolean;
+  /** True when today's Current PIXME switch is what's shown here. */
+  freshCharacter: boolean;
+  /** Calendar date (YYYY-MM-DD) this status represents. */
+  statusDate: string;
+  createdAt: string;
+}
+
+/** Compact form used in grids. */
+export interface DailyStatusSummary {
+  id: string;
+  characterImageUrl: string | null;
+  statusDate: string;
   mood: string | null;
   heartCount: number;
 }
 
-/** Owner-only view; adds the private original. */
-export interface MyPixelPost extends PixelPost {
-  originalImageUrl: string | null;
-  originalRetained: boolean;
-}
-
-export interface PublishPixelRequest {
-  caption?: string | null;
+/**
+ * Upserts today's status. Every field is optional: sending only
+ * `pixelCharacterId` is a free Current PIXME switch; sending only
+ * mood/message/tags is a pure text edit; both can be combined.
+ */
+export interface UpsertStatusRequest {
   mood?: string | null;
+  message?: string | null;
   tags?: string[];
-  /** When true, replaces today's existing representative post. */
-  replaceRepresentative?: boolean;
+  pixelCharacterId?: string | null;
 }
 
-export interface TodayStatus {
-  /** Today's published representative post, if any. */
-  myTodayPost: PixelPost | null;
+export interface TodayStatusResponse {
+  /** Today's own status, if any. */
+  myTodayStatus: DailyStatusEntry | null;
   firstGenerationAvailable: boolean;
   firstRetryAvailable: boolean;
   bonusFreeCredits: number;
   creditBalance: number;
   nextGenerationIsFree: boolean;
-  /** Candidate generations made today that were never published. */
+  /** Candidate generations made today that were never kept. */
   pendingGenerationId: string | null;
+  /** Whether being active today can place this user in the square. */
+  squareVisible: boolean;
+  /** Whether the one-time square visibility explanation has been shown. */
+  squareOnboarded: boolean;
 }
 
 /* ------------------------------------------------------------------ square */
@@ -325,12 +356,18 @@ export interface SquareProp {
   zIndex: number;
 }
 
+/** "🟢 지금 있어요" / "✨ 방금 도착했어요" / "오늘 다녀간 PIXME". */
+export type SquarePresenceState = 'JUST_ARRIVED' | 'ACTIVE' | 'VISITED';
+
 export interface SquareOccupant {
-  postId: string;
   userId: string;
+  /** Null when present today but no status set yet — still renders. */
+  dailyStatusId: string | null;
   nickname: string;
   characterImageUrl: string;
   mood: string | null;
+  message: string | null;
+  presenceState: SquarePresenceState;
   /** Canvas coordinates in `layout.squareCanvas` space. */
   x: number;
   y: number;
@@ -347,8 +384,8 @@ export interface SquareCuration {
 }
 
 export interface SquareCurationEntry {
-  postId: string;
   userId: string;
+  dailyStatusId: string | null;
   nickname: string;
   characterImageUrl: string;
   mood: string | null;
@@ -357,7 +394,7 @@ export interface SquareCurationEntry {
 /* --------------------------------------------------------------- reactions */
 
 export interface HeartResponse {
-  postId: string;
+  dailyStatusId: string;
   heartCount: number;
   heartedByMe: boolean;
 }
@@ -559,7 +596,7 @@ export type ReportReason =
   | 'HATE_SPEECH'
   | 'OTHER';
 
-export type ReportTargetType = 'USER' | 'PIXEL_POST' | 'MESSAGE';
+export type ReportTargetType = 'USER' | 'DAILY_STATUS' | 'MESSAGE';
 
 export interface CreateReportRequest {
   targetType: ReportTargetType;

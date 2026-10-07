@@ -20,6 +20,7 @@ import { ApiError, ApiErrorCode } from './errors';
 import { authApi as realAuthApi } from './endpoints/auth';
 import { chatApi as realChatApi } from './endpoints/chat';
 import { connectionsApi as realConnectionsApi } from './endpoints/connections';
+import { dailyStatusApi as realDailyStatusApi } from './endpoints/dailyStatus';
 import { notificationsApi as realNotificationsApi } from './endpoints/notifications';
 import { pixelsApi as realPixelsApi } from './endpoints/pixels';
 import { reactionsApi as realReactionsApi } from './endpoints/reactions';
@@ -34,20 +35,21 @@ import type {
   ConnectionStatus,
   Conversation,
   CreditSummary,
+  DailyStatusEntry,
+  DailyStatusSummary,
   Entitlements,
   Message,
   MeResponse,
-  MyPixelPost,
   Page,
+  PixelCharacter,
   PixelGeneration,
-  PixelPost,
-  PixelPostSummary,
   PostAuthor,
   PublicProfile,
   SpendKind,
+  SquareOccupant,
   SquareResponse,
   StoreCatalog,
-  TodayStatus,
+  TodayStatusResponse,
 } from './types';
 
 /* ------------------------------------------------------------------ utils */
@@ -81,9 +83,9 @@ interface MockPersonState {
   connectionCount: number;
   pixelCount: number;
   streakDays: number;
-  /** null until this person has a published representative post. */
-  representativeCharacterUrl: string | null;
   connectionStatus: ConnectionStatus;
+  /** null until this person has kept a character. */
+  currentCharacterId: string | null;
 }
 
 const me: MockPersonState = {
@@ -95,8 +97,8 @@ const me: MockPersonState = {
   connectionCount: 0,
   pixelCount: 0,
   streakDays: 0,
-  representativeCharacterUrl: null,
   connectionStatus: 'NONE',
+  currentCharacterId: null,
 };
 
 /** The other two "people" the preview populates the feed and square with. */
@@ -110,8 +112,8 @@ const others: MockPersonState[] = [
     connectionCount: 1,
     pixelCount: 8,
     streakDays: 3,
-    representativeCharacterUrl: MOCK_CHARACTER_URI,
     connectionStatus: 'NONE',
+    currentCharacterId: null,
   },
   {
     id: 'mock-hyunwoo',
@@ -122,8 +124,8 @@ const others: MockPersonState[] = [
     connectionCount: 0,
     pixelCount: 2,
     streakDays: 1,
-    representativeCharacterUrl: MOCK_CHARACTER_URI,
     connectionStatus: 'NONE',
+    currentCharacterId: null,
   },
 ];
 
@@ -132,11 +134,16 @@ function personById(userId: string): MockPersonState | null {
   return others.find((person) => person.id === userId) ?? null;
 }
 
+function representativeUrlOf(person: MockPersonState): string | null {
+  const character = person.currentCharacterId ? characters.get(person.currentCharacterId) : null;
+  return character?.characterImageUrl ?? null;
+}
+
 function author(person: MockPersonState): PostAuthor {
   return {
     id: person.id,
     nickname: person.nickname,
-    representativeCharacterUrl: person.representativeCharacterUrl,
+    representativeCharacterUrl: representativeUrlOf(person),
     connectionStatus: person.connectionStatus,
   };
 }
@@ -150,6 +157,8 @@ const settings: MeResponse['settings'] = {
   pushMessage: true,
   pushDailyReminder: true,
   keepOriginalPhoto: true,
+  squareVisible: false,
+  squareOnboarded: false,
 };
 
 /* ----------------------------------------------------------- entitlements */
@@ -259,35 +268,130 @@ function rootOf(generation: MockGeneration): string {
   return generation.retryOfGenerationId ?? generation.id;
 }
 
-/* ------------------------------------------------------------------ posts */
+/* ------------------------------------------------------------- characters */
 
-const posts = new Map<string, PixelPost | MyPixelPost>();
+const characters = new Map<string, PixelCharacter>();
+/** generationId -> characterId, so `keep` is idempotent per generation. */
+const characterByGeneration = new Map<string, string>();
+
+function keepCharacter(
+  person: MockPersonState,
+  generation: MockGeneration,
+  asCurrent: boolean,
+): PixelCharacter {
+  const existingId = characterByGeneration.get(generation.id);
+  if (existingId) {
+    const existing = characters.get(existingId)!;
+    if (asCurrent) setCurrentCharacter(person, existing.id);
+    return existing;
+  }
+
+  const id = nextId('char');
+  const character: PixelCharacter = {
+    id,
+    characterImageUrl: generation.characterImageUrl ?? MOCK_CHARACTER_URI,
+    style: generation.style,
+    label: null,
+    isCurrent: false,
+    hasOriginal: true,
+    createdAt: isoNow(),
+  };
+  characters.set(id, character);
+  characterByGeneration.set(generation.id, id);
+  person.pixelCount += 1;
+
+  if (asCurrent) setCurrentCharacter(person, id);
+  return character;
+}
+
+function setCurrentCharacter(person: MockPersonState, characterId: string): void {
+  if (person.currentCharacterId) {
+    const previous = characters.get(person.currentCharacterId);
+    if (previous) previous.isCurrent = false;
+  }
+  person.currentCharacterId = characterId;
+  const character = characters.get(characterId);
+  if (character) character.isCurrent = true;
+  ensureTodayPointsAt(person, characterId);
+}
+
+/* --------------------------------------------------------- daily statuses */
+
+const dailyStatuses = new Map<string, DailyStatusEntry>();
 const hearted = new Set<string>();
+/** personId -> today's dailyStatusId. */
+const todayStatusByPerson = new Map<string, string>();
 
-function seedTodayPost(person: MockPersonState, minutesAgo: number, caption: string, mood: string, tags: string[]): void {
-  const id = nextId('post');
-  const post: PixelPost = {
+function ensureTodayPointsAt(person: MockPersonState, characterId: string): DailyStatusEntry {
+  const character = characters.get(characterId);
+  const existingId = todayStatusByPerson.get(person.id);
+  if (existingId) {
+    const existing = dailyStatuses.get(existingId)!;
+    existing.characterImageUrl = character?.characterImageUrl ?? existing.characterImageUrl;
+    existing.freshCharacter = true;
+    return existing;
+  }
+
+  const id = nextId('status');
+  const status: DailyStatusEntry = {
+    id,
+    author: author(person),
+    characterImageUrl: character?.characterImageUrl ?? null,
+    mood: null,
+    message: null,
+    tags: [],
+    heartCount: 0,
+    heartedByMe: false,
+    freshCharacter: true,
+    statusDate: todayDate(),
+    createdAt: isoNow(),
+  };
+  dailyStatuses.set(id, status);
+  todayStatusByPerson.set(person.id, id);
+  person.streakDays += 1;
+  return status;
+}
+
+function seedTodayStatus(
+  person: MockPersonState,
+  minutesAgo: number,
+  message: string,
+  mood: string,
+  tags: string[],
+): void {
+  const characterId = nextId('char');
+  characters.set(characterId, {
+    id: characterId,
+    characterImageUrl: MOCK_CHARACTER_URI,
+    style: 'PIXME_BASIC',
+    label: null,
+    isCurrent: true,
+    hasOriginal: false,
+    createdAt: isoNow(-minutesAgo - 1),
+  });
+  person.currentCharacterId = characterId;
+  person.pixelCount += 1;
+
+  const id = nextId('status');
+  const status: DailyStatusEntry = {
     id,
     author: author(person),
     characterImageUrl: MOCK_CHARACTER_URI,
-    caption,
     mood,
+    message,
     tags,
-    style: 'PIXME_BASIC',
-    visibility: 'PUBLIC',
     heartCount: person.receivedHeartCount,
     heartedByMe: false,
-    postDate: todayDate(),
-    isRepresentative: true,
+    freshCharacter: true,
+    statusDate: todayDate(),
     createdAt: isoNow(-minutesAgo),
   };
-  posts.set(id, post);
+  dailyStatuses.set(id, status);
+  todayStatusByPerson.set(person.id, id);
 }
 
-seedTodayPost(others[0]!, 42, '오늘은 그냥 산책.', 'HAPPY', ['산책', '카페']);
-seedTodayPost(others[1]!, 140, '비 와서 그런가 좀 멍해요.', 'BLANK', ['집', '비오는날']);
-
-let myTodayPostId: string | null = null;
+seedTodayStatus(others[0]!, 42, '오늘은 그냥 산책.', 'HAPPY', ['산책', '카페']);
+seedTodayStatus(others[1]!, 140, '비 와서 그런가 좀 멍해요.', 'BLANK', ['집', '비오는날']);
 
 /* --------------------------------------------------------------- square --- */
 
@@ -304,6 +408,15 @@ const squareScene: SquareResponse['scene'] = {
     { code: 'BUS_STOP', x: 160, y: 900, scale: 1.2, zIndex: 3 },
   ],
 };
+
+/** Everyone with a today status is "present" in the mock square. */
+function presentPeople(): MockPersonState[] {
+  return [me, ...others].filter((person) => {
+    if (!todayStatusByPerson.has(person.id)) return false;
+    if (person.id === me.id) return settings.squareVisible;
+    return true;
+  });
+}
 
 /* ------------------------------------------------------------- connections */
 
@@ -408,7 +521,7 @@ function buildMeResponse(): MeResponse {
     status: 'ACTIVE',
     profileCompleted: true,
     interests: me.interests,
-    representativeCharacterUrl: me.representativeCharacterUrl,
+    representativeCharacterUrl: representativeUrlOf(me),
     stats: {
       receivedHeartCount: me.receivedHeartCount,
       connectionCount: me.connectionCount,
@@ -418,6 +531,16 @@ function buildMeResponse(): MeResponse {
     entitlements,
     settings,
     createdAt: isoNow(-60 * 24),
+  };
+}
+
+function summaryOf(status: DailyStatusEntry): DailyStatusSummary {
+  return {
+    id: status.id,
+    characterImageUrl: status.characterImageUrl,
+    statusDate: status.statusDate,
+    mood: status.mood,
+    heartCount: status.heartCount,
   };
 }
 
@@ -431,7 +554,10 @@ export const mockUsersApi = {
     if (body.nickname) me.nickname = body.nickname;
     if (body.bio !== undefined) me.bio = body.bio;
     if (body.interests) me.interests = body.interests;
-    if (body.settings) Object.assign(settings, body.settings);
+    if (body.settings) {
+      Object.assign(settings, body.settings);
+      if (body.settings.squareVisible !== undefined) settings.squareOnboarded = true;
+    }
     return buildMeResponse();
   },
   checkNickname: async () => {
@@ -444,33 +570,22 @@ export const mockUsersApi = {
     if (!person) {
       throw new ApiError({ code: ApiErrorCode.Validation, message: '사용자를 찾을 수 없어요.', status: 404 });
     }
-    const todayPost = [...posts.values()].find(
-      (post) => post.author.id === person.id && post.isRepresentative,
-    );
+    const statusId = todayStatusByPerson.get(person.id);
+    const todayStatus = statusId ? dailyStatuses.get(statusId) ?? null : null;
     return {
       id: person.id,
       nickname: person.nickname,
       bio: person.bio,
       interests: person.interests,
-      representativeCharacterUrl: person.representativeCharacterUrl,
-      todayPost: todayPost ?? null,
-      recentPosts: todayPost
-        ? [
-            {
-              id: todayPost.id,
-              characterImageUrl: todayPost.characterImageUrl,
-              postDate: todayPost.postDate,
-              mood: todayPost.mood,
-              heartCount: todayPost.heartCount,
-            },
-          ]
-        : [],
+      representativeCharacterUrl: representativeUrlOf(person),
+      todayStatus,
+      recentStatuses: todayStatus ? [summaryOf(todayStatus)] : [],
       stats: { receivedHeartCount: person.receivedHeartCount, pixelCount: person.pixelCount },
       relation: {
         isMe: person.id === me.id,
         connectionStatus: person.connectionStatus,
         conversationId: connections.get(connectionId(person.id))?.conversationId ?? null,
-        heartedTodayPost: todayPost ? hearted.has(todayPost.id) : false,
+        heartedTodayStatus: todayStatus ? hearted.has(todayStatus.id) : false,
         blockedByMe: false,
       },
     };
@@ -529,95 +644,39 @@ export const mockPixelsApi = {
     return pollGeneration(generationId);
   },
 
-  publish: async (generationId, body): Promise<PixelPost> => {
+  keep: async (generationId, body): Promise<PixelCharacter> => {
     await delay();
     const generation = generations.get(generationId);
-    if (!generation || generation.status !== 'COMPLETED' || !generation.characterImageUrl) {
+    if (!generation || generation.status !== 'COMPLETED') {
       throw new ApiError({ code: ApiErrorCode.Validation, message: '아직 완성되지 않았어요.', status: 409 });
     }
+    return keepCharacter(me, generation, body.asCurrent);
+  },
 
-    if (myTodayPostId && !body.replaceRepresentative) {
+  collection: async (): Promise<PixelCharacter[]> => {
+    await delay();
+    return [...characters.values()]
+      .filter((character) => characterOwnerId(character.id) === me.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+
+  setCurrent: async (characterId): Promise<PixelCharacter> => {
+    await delay();
+    const character = characters.get(characterId);
+    if (!character) throw new ApiError({ code: ApiErrorCode.Validation, message: '찾을 수 없어요.', status: 404 });
+    setCurrentCharacter(me, characterId);
+    return character;
+  },
+
+  deleteCharacter: async (characterId) => {
+    if (me.currentCharacterId === characterId) {
       throw new ApiError({
-        code: ApiErrorCode.AlreadyPublishedToday,
-        message: '오늘의 PIXME가 이미 있어요.',
-        status: 409,
+        code: ApiErrorCode.Validation,
+        message: '현재 사용 중인 PIXME는 삭제할 수 없어요.',
+        status: 400,
       });
     }
-    if (myTodayPostId) {
-      const previous = posts.get(myTodayPostId);
-      if (previous) previous.isRepresentative = false;
-    }
-
-    const id = nextId('post');
-    const post: MyPixelPost = {
-      id,
-      author: author(me),
-      characterImageUrl: generation.characterImageUrl,
-      caption: body.caption ?? null,
-      mood: body.mood ?? null,
-      tags: body.tags ?? [],
-      style: generation.style,
-      visibility: 'PUBLIC',
-      heartCount: 0,
-      heartedByMe: false,
-      postDate: todayDate(),
-      isRepresentative: true,
-      createdAt: isoNow(),
-      originalImageUrl: null,
-      originalRetained: false,
-    };
-    posts.set(id, post);
-    myTodayPostId = id;
-    me.representativeCharacterUrl = post.characterImageUrl;
-    me.pixelCount += 1;
-    me.streakDays += 1;
-    return post;
-  },
-
-  todayStatus: async (): Promise<TodayStatus> => {
-    await delay(150);
-    const myPost = myTodayPostId ? posts.get(myTodayPostId) ?? null : null;
-    return {
-      myTodayPost: myPost,
-      firstGenerationAvailable: entitlements.firstGenerationAvailable,
-      firstRetryAvailable: entitlements.firstRetryAvailable,
-      bonusFreeCredits: entitlements.bonusFreeCredits,
-      creditBalance: entitlements.creditBalance,
-      nextGenerationIsFree: entitlements.nextGenerationIsFree,
-      pendingGenerationId: null,
-    };
-  },
-
-  todayFeed: async (): Promise<Page<PixelPost>> => {
-    await delay();
-    const items = [...posts.values()].filter(
-      (post) => post.author.id !== me.id && post.isRepresentative,
-    );
-    return { items, nextCursor: null, hasMore: false };
-  },
-
-  myPixels: async (): Promise<Page<MyPixelPost>> => {
-    await delay();
-    const items = [...posts.values()].filter(
-      (post): post is MyPixelPost => post.author.id === me.id,
-    );
-    return { items, nextCursor: null, hasMore: false };
-  },
-
-  detail: async (postId) => {
-    await delay(150);
-    const post = posts.get(postId);
-    if (!post) throw new ApiError({ code: ApiErrorCode.Validation, message: '찾을 수 없어요.', status: 404 });
-    return post;
-  },
-
-  myDetail: async (postId) => {
-    await delay(150);
-    const post = posts.get(postId);
-    if (!post || post.author.id !== me.id) {
-      throw new ApiError({ code: ApiErrorCode.Validation, message: '찾을 수 없어요.', status: 404 });
-    }
-    return post as MyPixelPost;
+    characters.delete(characterId);
   },
 
   originalUrl: async () => {
@@ -625,63 +684,119 @@ export const mockPixelsApi = {
   },
 
   deleteOriginal: async () => undefined,
+} satisfies typeof realPixelsApi;
 
-  unpublish: async (postId) => {
-    const post = posts.get(postId);
-    if (!post) throw new ApiError({ code: ApiErrorCode.Validation, message: '찾을 수 없어요.', status: 404 });
-    post.isRepresentative = false;
-    post.visibility = 'PRIVATE';
-    if (myTodayPostId === postId) myTodayPostId = null;
-    return post;
-  },
+/** Which mock person owns a character — only "나" keeps new ones in the preview. */
+function characterOwnerId(characterId: string): string {
+  return me.currentCharacterId === characterId || characterByGeneration.has(characterId)
+    ? me.id
+    : (() => {
+        for (const id of todayStatusByPerson.keys()) {
+          const person = personById(id);
+          if (person?.currentCharacterId === characterId) return person.id;
+        }
+        return me.id;
+      })();
+}
 
-  deletePost: async (postId) => {
-    posts.delete(postId);
-    if (myTodayPostId === postId) myTodayPostId = null;
-  },
-
-  userPixels: async (userId): Promise<Page<PixelPostSummary>> => {
+export const mockDailyStatusApi = {
+  todayFeed: async (): Promise<Page<DailyStatusEntry>> => {
     await delay();
-    const items = [...posts.values()]
-      .filter((post) => post.author.id === userId)
-      .map((post) => ({
-        id: post.id,
-        characterImageUrl: post.characterImageUrl,
-        postDate: post.postDate,
-        mood: post.mood,
-        heartCount: post.heartCount,
-      }));
+    const items = [...others]
+      .map((person) => todayStatusByPerson.get(person.id))
+      .filter((id): id is string => Boolean(id))
+      .map((id) => dailyStatuses.get(id)!)
+      .filter(Boolean);
     return { items, nextCursor: null, hasMore: false };
   },
-} satisfies typeof realPixelsApi;
+
+  myToday: async (): Promise<TodayStatusResponse> => {
+    await delay(150);
+    const statusId = todayStatusByPerson.get(me.id);
+    const myTodayStatus = statusId ? dailyStatuses.get(statusId) ?? null : null;
+    return {
+      myTodayStatus,
+      firstGenerationAvailable: entitlements.firstGenerationAvailable,
+      firstRetryAvailable: entitlements.firstRetryAvailable,
+      bonusFreeCredits: entitlements.bonusFreeCredits,
+      creditBalance: entitlements.creditBalance,
+      nextGenerationIsFree: entitlements.nextGenerationIsFree,
+      pendingGenerationId: null,
+      squareVisible: settings.squareVisible,
+      squareOnboarded: settings.squareOnboarded,
+    };
+  },
+
+  upsertMyToday: async (body): Promise<DailyStatusEntry> => {
+    await delay();
+    const characterId = body.pixelCharacterId ?? me.currentCharacterId;
+    if (!characterId) {
+      throw new ApiError({ code: ApiErrorCode.Validation, message: '먼저 PIXME를 만들어주세요.', status: 400 });
+    }
+    const status = ensureTodayPointsAt(me, characterId);
+    if (body.mood !== undefined) status.mood = body.mood ?? null;
+    if (body.message !== undefined) status.message = body.message ?? null;
+    if (body.tags !== undefined) status.tags = body.tags ?? [];
+    if (body.pixelCharacterId === undefined) status.freshCharacter = false;
+    return status;
+  },
+
+  myHistory: async (): Promise<Page<DailyStatusSummary>> => {
+    await delay();
+    const statusId = todayStatusByPerson.get(me.id);
+    const items = statusId && dailyStatuses.has(statusId) ? [summaryOf(dailyStatuses.get(statusId)!)] : [];
+    return { items, nextCursor: null, hasMore: false };
+  },
+
+  detail: async (dailyStatusId) => {
+    await delay(150);
+    const status = dailyStatuses.get(dailyStatusId);
+    if (!status) throw new ApiError({ code: ApiErrorCode.Validation, message: '찾을 수 없어요.', status: 404 });
+    return status;
+  },
+
+  userHistory: async (userId): Promise<Page<DailyStatusSummary>> => {
+    await delay();
+    const statusId = todayStatusByPerson.get(userId);
+    const items = statusId && dailyStatuses.has(statusId) ? [summaryOf(dailyStatuses.get(statusId)!)] : [];
+    return { items, nextCursor: null, hasMore: false };
+  },
+} satisfies typeof realDailyStatusApi;
 
 export const mockSquareApi = {
   today: async (): Promise<SquareResponse> => {
     await delay();
-    const todayPosts = [...posts.values()].filter((post) => post.isRepresentative);
-    const occupants: SquareResponse['occupants'] = todayPosts.map((post, index) => ({
-      postId: post.id,
-      userId: post.author.id,
-      nickname: post.author.nickname,
-      characterImageUrl: post.characterImageUrl,
-      mood: post.mood,
-      x: 220 + index * 260,
-      y: 500 + (index % 2) * 320,
-      idleVariant: index % 3,
-      depth: index % 3,
-    }));
+    const present = presentPeople();
+    const occupants: SquareOccupant[] = present.map((person, index) => {
+      const statusId = todayStatusByPerson.get(person.id);
+      const status = statusId ? dailyStatuses.get(statusId) ?? null : null;
+      return {
+        userId: person.id,
+        dailyStatusId: status?.id ?? null,
+        nickname: person.nickname,
+        characterImageUrl: representativeUrlOf(person) ?? MOCK_CHARACTER_URI,
+        mood: status?.mood ?? null,
+        message: status?.message ?? null,
+        presenceState: index === 0 ? 'JUST_ARRIVED' : 'ACTIVE',
+        x: 220 + index * 260,
+        y: 500 + (index % 2) * 320,
+        idleVariant: index % 3,
+        depth: index % 3,
+      };
+    });
 
     const heartsRail = [...others]
       .sort((a, b) => b.receivedHeartCount - a.receivedHeartCount)
       .slice(0, 2)
       .map((person) => {
-        const post = [...posts.values()].find((item) => item.author.id === person.id);
+        const statusId = todayStatusByPerson.get(person.id);
+        const status = statusId ? dailyStatuses.get(statusId) : null;
         return {
-          postId: post?.id ?? person.id,
           userId: person.id,
+          dailyStatusId: status?.id ?? null,
           nickname: person.nickname,
-          characterImageUrl: person.representativeCharacterUrl ?? MOCK_CHARACTER_URI,
-          mood: post?.mood ?? null,
+          characterImageUrl: representativeUrlOf(person) ?? MOCK_CHARACTER_URI,
+          mood: status?.mood ?? null,
         };
       });
 
@@ -699,31 +814,31 @@ export const mockSquareApi = {
 } satisfies typeof realSquareApi;
 
 export const mockReactionsApi = {
-  sendHeart: async (postId) => {
+  sendHeart: async (dailyStatusId) => {
     await delay(150);
-    const post = posts.get(postId);
-    if (!post) throw new ApiError({ code: ApiErrorCode.Validation, message: '찾을 수 없어요.', status: 404 });
-    if (!hearted.has(postId)) {
-      hearted.add(postId);
-      post.heartCount += 1;
-      post.heartedByMe = true;
-      const target = personById(post.author.id);
+    const status = dailyStatuses.get(dailyStatusId);
+    if (!status) throw new ApiError({ code: ApiErrorCode.Validation, message: '찾을 수 없어요.', status: 404 });
+    if (!hearted.has(dailyStatusId)) {
+      hearted.add(dailyStatusId);
+      status.heartCount += 1;
+      status.heartedByMe = true;
+      const target = personById(status.author.id);
       if (target) target.receivedHeartCount += 1;
     }
-    return { postId, heartCount: post.heartCount, heartedByMe: true };
+    return { dailyStatusId, heartCount: status.heartCount, heartedByMe: true };
   },
-  removeHeart: async (postId) => {
+  removeHeart: async (dailyStatusId) => {
     await delay(150);
-    const post = posts.get(postId);
-    if (!post) throw new ApiError({ code: ApiErrorCode.Validation, message: '찾을 수 없어요.', status: 404 });
-    if (hearted.has(postId)) {
-      hearted.delete(postId);
-      post.heartCount = Math.max(0, post.heartCount - 1);
-      post.heartedByMe = false;
-      const target = personById(post.author.id);
+    const status = dailyStatuses.get(dailyStatusId);
+    if (!status) throw new ApiError({ code: ApiErrorCode.Validation, message: '찾을 수 없어요.', status: 404 });
+    if (hearted.has(dailyStatusId)) {
+      hearted.delete(dailyStatusId);
+      status.heartCount = Math.max(0, status.heartCount - 1);
+      status.heartedByMe = false;
+      const target = personById(status.author.id);
       if (target) target.receivedHeartCount = Math.max(0, target.receivedHeartCount - 1);
     }
-    return { postId, heartCount: post.heartCount, heartedByMe: false };
+    return { dailyStatusId, heartCount: status.heartCount, heartedByMe: false };
   },
 } satisfies typeof realReactionsApi;
 

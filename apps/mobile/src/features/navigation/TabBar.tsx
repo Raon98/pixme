@@ -35,7 +35,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const badge = useNotificationBadge();
 
   const needsTodayPixel = todayStatus.data
-    ? todayStatus.data.myTodayPost === null
+    ? todayStatus.data.myTodayStatus === null
     : false;
 
   const routes = state.routes.filter((route) => TAB_META[route.name]);

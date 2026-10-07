@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useNavigation } from 'expo-router';
 
-import type { PixelPost } from '@/api';
+import type { DailyStatusEntry } from '@/api';
 import { copy } from '@/constants/copy';
 import { analytics } from '@/lib/analytics';
 import { layout, spacing, useTheme } from '@/theme';
@@ -42,10 +42,10 @@ export default function TodayRoute() {
   const todayStatus = useTodayStatus();
   const badge = useNotificationBadge();
 
-  const listRef = useRef<FlashListRef<PixelPost>>(null);
+  const listRef = useRef<FlashListRef<DailyStatusEntry>>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
-  const posts = flattenFeed(feed.data);
+  const statuses = flattenFeed(feed.data);
 
   /**
    * Page height = viewport minus the tab bar and the top inset, so one card is
@@ -71,22 +71,22 @@ export default function TodayRoute() {
       const first = viewableItems[0];
       if (first?.index != null) {
         setActiveIndex(first.index);
-        const post = posts[first.index];
-        if (post) {
+        const status = statuses[first.index];
+        if (status) {
           analytics.track('FEED_CARD_VIEWED', {
-            postId: post.id,
+            dailyStatusId: status.id,
             position: first.index,
           });
         }
       }
     },
-    [posts],
+    [statuses],
   );
 
   const renderItem = useCallback(
-    ({ item, index }: { item: PixelPost; index: number }) => (
+    ({ item, index }: { item: DailyStatusEntry; index: number }) => (
       <FeedCard
-        post={item}
+        status={item}
         height={pageHeight}
         active={index === activeIndex}
       />
@@ -101,8 +101,8 @@ export default function TodayRoute() {
       large
       title={copy.today.title}
       subtitle={
-        todayStatus.data?.myTodayPost
-          ? '오늘의 PIXME를 이미 남겼어요.'
+        todayStatus.data?.myTodayStatus
+          ? '오늘의 상태를 이미 남겼어요.'
           : copy.today.myPixelMissingTitle
       }
       right={
@@ -147,7 +147,7 @@ export default function TodayRoute() {
     );
   }
 
-  if (posts.length === 0) {
+  if (statuses.length === 0) {
     return (
       <Screen edges={['top']}>
         {header}
@@ -175,7 +175,7 @@ export default function TodayRoute() {
         {pageHeight > 0 ? (
           <FlashList
             ref={listRef}
-            data={posts}
+            data={statuses}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             pagingEnabled

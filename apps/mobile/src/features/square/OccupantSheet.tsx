@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 
-import { pixelsApi, qk, type SquareOccupant } from '@/api';
+import { dailyStatusApi, qk, type SquareOccupant } from '@/api';
 import { copy } from '@/constants/copy';
 import { moodEmoji, moodLabel } from '@/constants/moods';
 import { formatTag } from '@/constants/tags';
@@ -24,7 +24,7 @@ import { useConnectionRequest } from '../connections/useConnectionRequest';
 import { useHeart } from '../reactions/useHeart';
 
 export interface OccupantSheetProps {
-  occupant: Pick<SquareOccupant, 'postId' | 'userId' | 'nickname' | 'characterImageUrl' | 'mood'> | null;
+  occupant: Pick<SquareOccupant, 'dailyStatusId' | 'userId' | 'nickname' | 'characterImageUrl' | 'mood'> | null;
   onClose: () => void;
 }
 
@@ -43,21 +43,21 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
   const [localHearted, setLocalHearted] = useState<boolean | null>(null);
 
   const query = useQuery({
-    queryKey: qk.pixels.detail(occupant?.postId ?? 'none'),
-    queryFn: () => pixelsApi.detail(occupant!.postId),
-    enabled: !!occupant,
+    queryKey: qk.dailyStatus.detail(occupant?.dailyStatusId ?? 'none'),
+    queryFn: () => dailyStatusApi.detail(occupant!.dailyStatusId!),
+    enabled: !!occupant?.dailyStatusId,
     staleTime: 60_000,
   });
 
-  const post = query.data;
-  const hearted = localHearted ?? post?.heartedByMe ?? false;
+  const status = query.data;
+  const hearted = localHearted ?? status?.heartedByMe ?? false;
   const waveSent =
-    post?.author.connectionStatus === 'REQUESTED_BY_ME' ||
-    post?.author.connectionStatus === 'CONNECTED';
+    status?.author.connectionStatus === 'REQUESTED_BY_ME' ||
+    status?.author.connectionStatus === 'CONNECTED';
 
   const onHeart = useCallback(() => {
-    if (!post) return;
-    const next = toggleHeart(post);
+    if (!status) return;
+    const next = toggleHeart(status);
     setLocalHearted(next);
     if (next) {
       toast.show({
@@ -66,7 +66,7 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
         icon: 'heart-filled',
       });
     }
-  }, [post, toggleHeart, toast]);
+  }, [status, toggleHeart, toast]);
 
   const onWave = useCallback(() => {
     if (!occupant) return;
@@ -120,7 +120,7 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
             @{occupant.nickname}
           </Text>
 
-          {query.isPending ? (
+          {occupant.dailyStatusId && query.isPending ? (
             <View style={styles.loading}>
               <Skeleton width="70%" height={18} style={styles.center} />
               <Skeleton
@@ -131,31 +131,31 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
             </View>
           ) : (
             <>
-              {post?.caption ? (
+              {status?.message ? (
                 <Text
                   variant="callout"
                   align="center"
                   tone="secondary"
                   style={styles.caption}
                 >
-                  “{post.caption}”
+                  “{status.message}”
                 </Text>
               ) : null}
 
-              {post?.mood ? (
+              {(status?.mood ?? occupant.mood) ? (
                 <Text
                   variant="title2"
                   align="center"
                   style={styles.mood}
-                  accessibilityLabel={`기분 ${moodLabel(post.mood)}`}
+                  accessibilityLabel={`기분 ${moodLabel((status?.mood ?? occupant.mood)!)}`}
                 >
-                  {moodEmoji(post.mood)}
+                  {moodEmoji((status?.mood ?? occupant.mood)!)}
                 </Text>
               ) : null}
 
-              {post && post.tags.length > 0 ? (
+              {status && status.tags.length > 0 ? (
                 <View style={styles.tags}>
-                  {post.tags.map((tag) => (
+                  {status.tags.map((tag: string) => (
                     <Text key={tag} variant="caption" tone="accent" style={styles.tag}>
                       {formatTag(tag)}
                     </Text>
@@ -163,11 +163,11 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
                 </View>
               ) : null}
 
-              {post && post.heartCount > 0 ? (
+              {status && status.heartCount > 0 ? (
                 <View style={styles.heartRow}>
                   <Icon name="heart-filled" size={14} color={colors.heart} />
                   <Text variant="micro" tone="secondary" style={styles.heartText}>
-                    {formatCount(post.heartCount)}
+                    {formatCount(status.heartCount)}
                   </Text>
                 </View>
               ) : null}
@@ -187,7 +187,7 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
                 />
               }
               onPress={onHeart}
-              disabled={!post}
+              disabled={!status}
               style={styles.actionButton}
             />
             <Button

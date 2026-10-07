@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import type { PixelPostSummary } from '@/api';
+import type { DailyStatusSummary } from '@/api';
 import { copy } from '@/constants/copy';
 import { interestLabel } from '@/constants/interests';
 import { moodEmoji } from '@/constants/moods';
@@ -152,12 +152,12 @@ export default function UserProfileRoute() {
           >
             <PixelCharacter
               uri={
-                user.todayPost?.characterImageUrl ??
+                user.todayStatus?.characterImageUrl ??
                 user.representativeCharacterUrl
               }
               size={132}
               idle
-              accessibilityLabel={`${user.nickname}의 대표 PIXME`}
+              accessibilityLabel={`${user.nickname}의 Current PIXME`}
             />
           </View>
 
@@ -193,31 +193,31 @@ export default function UserProfileRoute() {
 
         {/* actions */}
         <View style={styles.actions}>
-          {user.todayPost ? (
+          {user.todayStatus ? (
             <Button
               label={
-                user.relation.heartedTodayPost
+                user.relation.heartedTodayStatus
                   ? copy.reactions.heartSent
                   : copy.reactions.heart
               }
-              variant={user.relation.heartedTodayPost ? 'heart' : 'secondary'}
+              variant={user.relation.heartedTodayStatus ? 'heart' : 'secondary'}
               size="md"
               icon={
                 <Icon
                   name={
-                    user.relation.heartedTodayPost ? 'heart-filled' : 'heart'
+                    user.relation.heartedTodayStatus ? 'heart-filled' : 'heart'
                   }
                   size={16}
                   color={
-                    user.relation.heartedTodayPost
+                    user.relation.heartedTodayStatus
                       ? colors.textOnAccent
                       : colors.textSecondary
                   }
                 />
               }
               onPress={() => {
-                if (!user.todayPost) return;
-                const next = toggleHeart(user.todayPost);
+                if (!user.todayStatus) return;
+                const next = toggleHeart(user.todayStatus);
                 if (next) {
                   toast.show({
                     message: copy.reactions.heartSent,
@@ -272,7 +272,7 @@ export default function UserProfileRoute() {
           {copy.profile.recentOther}
         </Text>
 
-        {user.recentPosts.length === 0 ? (
+        {user.recentStatuses.length === 0 ? (
           <EmptyState
             compact
             glyph="👾"
@@ -280,11 +280,11 @@ export default function UserProfileRoute() {
           />
         ) : (
           <View style={styles.grid}>
-            {user.recentPosts.map((post) => (
+            {user.recentStatuses.map((status) => (
               <HistoryTile
-                key={post.id}
-                post={post}
-                onPress={() => router.push(`/pixel/${post.id}`)}
+                key={status.id}
+                status={status}
+                onPress={() => router.push(`/daily-status/${status.id}`)}
               />
             ))}
           </View>
@@ -343,17 +343,17 @@ export default function UserProfileRoute() {
 }
 
 function HistoryTile({
-  post,
+  status,
   onPress,
 }: {
-  post: PixelPostSummary;
+  status: DailyStatusSummary;
   onPress: () => void;
 }) {
   const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${post.postDate}의 PIXME`}
+      accessibilityLabel={`${status.statusDate}의 PIXME`}
       onPress={onPress}
       style={({ pressed }) => [
         styles.gridItem,
@@ -364,10 +364,10 @@ function HistoryTile({
         },
       ]}
     >
-      <PixelCharacter uri={post.characterImageUrl} size={68} />
+      <PixelCharacter uri={status.characterImageUrl} size={68} />
       <Text variant="micro" tone="tertiary">
-        {post.postDate.slice(5).replace('-', '.')}
-        {post.mood ? ` ${moodEmoji(post.mood)}` : ''}
+        {status.statusDate.slice(5).replace('-', '.')}
+        {status.mood ? ` ${moodEmoji(status.mood)}` : ''}
       </Text>
     </Pressable>
   );

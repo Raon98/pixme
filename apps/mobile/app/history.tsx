@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
-import type { MyPixelPost } from '@/api';
+import type { DailyStatusSummary } from '@/api';
 import { copy } from '@/constants/copy';
 import { moodEmoji } from '@/constants/moods';
 import { formatDayNumber } from '@/lib/format';
@@ -18,7 +18,7 @@ import {
   Screen,
   Text,
 } from '@/ui';
-import { groupByMonth, useMyPixels } from '@/features/history/useMyPixels';
+import { groupByMonth, useMyHistory } from '@/features/dailyStatus/useDailyStatusHistory';
 
 type ViewMode = 'grid' | 'calendar';
 
@@ -34,7 +34,7 @@ export default function HistoryRoute() {
   const { colors } = useTheme();
   const [mode, setMode] = useState<ViewMode>('grid');
 
-  const history = useMyPixels();
+  const history = useMyHistory();
   const sections = useMemo(() => groupByMonth(history.data), [history.data]);
 
   const header = (
@@ -124,12 +124,12 @@ export default function HistoryRoute() {
           mode === 'grid' ? (
             <MonthGrid
               items={item}
-              onSelect={(post) => router.push(`/pixel/${post.id}`)}
+              onSelect={(status) => router.push(`/daily-status/${status.id}`)}
             />
           ) : (
             <MonthCalendar
               items={item}
-              onSelect={(post) => router.push(`/pixel/${post.id}`)}
+              onSelect={(status) => router.push(`/daily-status/${status.id}`)}
             />
           )
         }
@@ -143,18 +143,18 @@ function MonthGrid({
   items,
   onSelect,
 }: {
-  items: MyPixelPost[];
-  onSelect: (post: MyPixelPost) => void;
+  items: DailyStatusSummary[];
+  onSelect: (status: DailyStatusSummary) => void;
 }) {
   const { colors } = useTheme();
   return (
     <View style={styles.grid}>
-      {items.map((post) => (
+      {items.map((status) => (
         <Pressable
-          key={post.id}
+          key={status.id}
           accessibilityRole="button"
-          accessibilityLabel={`${post.postDate}의 PIXME`}
-          onPress={() => onSelect(post)}
+          accessibilityLabel={`${status.statusDate}의 PIXME`}
+          onPress={() => onSelect(status)}
           style={({ pressed }) => [
             styles.gridItem,
             {
@@ -164,10 +164,10 @@ function MonthGrid({
             },
           ]}
         >
-          <PixelCharacter uri={post.characterImageUrl} size={64} />
+          <PixelCharacter uri={status.characterImageUrl} size={64} />
           <Text variant="micro" tone="tertiary">
-            {post.postDate.slice(5).replace('-', '.')}
-            {post.mood ? ` ${moodEmoji(post.mood)}` : ''}
+            {status.statusDate.slice(5).replace('-', '.')}
+            {status.mood ? ` ${moodEmoji(status.mood)}` : ''}
           </Text>
         </Pressable>
       ))}
@@ -183,27 +183,27 @@ function MonthCalendar({
   items,
   onSelect,
 }: {
-  items: MyPixelPost[];
-  onSelect: (post: MyPixelPost) => void;
+  items: DailyStatusSummary[];
+  onSelect: (status: DailyStatusSummary) => void;
 }) {
   const { colors } = useTheme();
 
   const first = items[0];
   if (!first) return null;
 
-  const [yearText, monthText] = first.postDate.split('-');
+  const [yearText, monthText] = first.statusDate.split('-');
   const year = Number(yearText);
   const month = Number(monthText);
 
   const daysInMonth = new Date(year, month, 0).getDate();
   const leadingBlanks = new Date(year, month - 1, 1).getDay();
 
-  const byDay = new Map<number, MyPixelPost>();
-  for (const post of items) {
-    byDay.set(Number(formatDayNumber(post.postDate)), post);
+  const byDay = new Map<number, DailyStatusSummary>();
+  for (const status of items) {
+    byDay.set(Number(formatDayNumber(status.statusDate)), status);
   }
 
-  const cells: (MyPixelPost | null)[] = [
+  const cells: (DailyStatusSummary | null)[] = [
     ...Array.from({ length: leadingBlanks }, () => null),
     ...Array.from(
       { length: daysInMonth },
@@ -222,26 +222,26 @@ function MonthCalendar({
       </View>
 
       <View style={styles.calendar}>
-        {cells.map((post, index) => (
+        {cells.map((status, index) => (
           <Pressable
             key={index}
-            accessibilityRole={post ? 'button' : undefined}
-            accessibilityLabel={post ? `${post.postDate}의 PIXME` : undefined}
-            disabled={!post}
-            onPress={() => post && onSelect(post)}
+            accessibilityRole={status ? 'button' : undefined}
+            accessibilityLabel={status ? `${status.statusDate}의 PIXME` : undefined}
+            disabled={!status}
+            onPress={() => status && onSelect(status)}
             style={({ pressed }) => [
               styles.calendarCell,
-              post
+              status
                 ? {
                     backgroundColor: colors.surfaceSubtle,
                     borderColor: colors.border,
                   }
                 : { borderColor: 'transparent' },
-              pressed && post ? { opacity: opacity.pressed } : null,
+              pressed && status ? { opacity: opacity.pressed } : null,
             ]}
           >
-            {post ? (
-              <PixelCharacter uri={post.characterImageUrl} size={34} />
+            {status ? (
+              <PixelCharacter uri={status.characterImageUrl} size={34} />
             ) : null}
           </Pressable>
         ))}

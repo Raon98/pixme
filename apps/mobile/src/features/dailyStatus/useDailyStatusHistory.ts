@@ -1,20 +1,19 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
 import {
-  pixelsApi,
+  dailyStatusApi,
   qk,
-  type MyPixelPost,
+  type DailyStatusSummary,
   type Page,
-  type PixelPostSummary,
 } from '@/api';
 import { config } from '@/lib/config';
 import { formatMonthTitle } from '@/lib/format';
 
-export function useMyPixels() {
-  return useInfiniteQuery<Page<MyPixelPost>, Error>({
-    queryKey: qk.pixels.mine(),
+export function useMyHistory() {
+  return useInfiniteQuery<Page<DailyStatusSummary>, Error>({
+    queryKey: qk.dailyStatus.history(),
     queryFn: ({ pageParam }) =>
-      pixelsApi.myPixels(
+      dailyStatusApi.myHistory(
         pageParam as string | null,
         config.rules.historyPageSize,
       ),
@@ -27,7 +26,7 @@ export function useMyPixels() {
 export interface HistorySection {
   title: string;
   monthKey: string;
-  items: MyPixelPost[];
+  items: DailyStatusSummary[];
 }
 
 /**
@@ -35,7 +34,7 @@ export interface HistorySection {
  * 옷도 입었구나"), so month headers matter more than a flat infinite grid.
  */
 export function groupByMonth(
-  data: { pages: Page<MyPixelPost>[] } | undefined,
+  data: { pages: Page<DailyStatusSummary>[] } | undefined,
 ): HistorySection[] {
   if (!data) return [];
 
@@ -43,7 +42,7 @@ export function groupByMonth(
 
   for (const page of data.pages) {
     for (const item of page.items) {
-      const monthKey = item.postDate.slice(0, 7);
+      const monthKey = item.statusDate.slice(0, 7);
       const existing = sections.get(monthKey);
       if (existing) {
         existing.items.push(item);
@@ -62,19 +61,19 @@ export function groupByMonth(
   );
 }
 
-export function useMyPixelDetail(postId: string) {
+export function useMyDailyStatusDetail(dailyStatusId: string) {
   return useQuery({
-    queryKey: qk.pixels.detail(postId),
-    queryFn: () => pixelsApi.myDetail(postId),
+    queryKey: qk.dailyStatus.detail(dailyStatusId),
+    queryFn: () => dailyStatusApi.detail(dailyStatusId),
     staleTime: 60_000,
   });
 }
 
-export function useUserPixels(userId: string) {
-  return useInfiniteQuery<Page<PixelPostSummary>, Error>({
-    queryKey: qk.pixels.byUser(userId),
+export function useUserHistory(userId: string) {
+  return useInfiniteQuery<Page<DailyStatusSummary>, Error>({
+    queryKey: qk.dailyStatus.byUser(userId),
     queryFn: ({ pageParam }) =>
-      pixelsApi.userPixels(
+      dailyStatusApi.userHistory(
         userId,
         pageParam as string | null,
         config.rules.historyPageSize,

@@ -62,7 +62,7 @@ export default function CreateRoute() {
     }
   }, [handleOutcome]);
 
-  const alreadyPublished = !!todayStatus.data?.myTodayPost;
+  const alreadyPublished = !!todayStatus.data?.myTodayStatus;
   const isFree = todayStatus.data?.nextGenerationIsFree ?? true;
   const bonusFree = todayStatus.data?.bonusFreeCredits ?? 0;
   const credits = todayStatus.data?.creditBalance ?? 0;
@@ -75,7 +75,7 @@ export default function CreateRoute() {
         title={copy.create.sheetTitle}
         subtitle={
           alreadyPublished
-            ? '오늘 대표 PIXME가 이미 있어요. 새로 만들면 바꿀 수 있어요.'
+            ? '오늘의 PIXME를 이미 만들었어요. 새로 만들면 Current PIXME를 바꿀 수 있어요.'
             : undefined
         }
       >

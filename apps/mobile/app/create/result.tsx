@@ -228,7 +228,7 @@ export default function ResultRoute() {
                 : copy.generation.resultTitle}
             </Text>
 
-            {todayStatus.data?.myTodayPost ? (
+            {todayStatus.data?.myTodayStatus ? (
               <Text
                 variant="caption"
                 tone="secondary"

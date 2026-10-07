@@ -1,4 +1,4 @@
-import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { copy } from '@/constants/copy';
@@ -19,8 +19,9 @@ import {
   Text,
 } from '@/ui';
 import { useMe } from '@/features/profile/useProfile';
-import { useMyPixels } from '@/features/history/useMyPixels';
+import { useMyHistory } from '@/features/dailyStatus/useDailyStatusHistory';
 import { useTodayStatus } from '@/features/feed/useTodayFeed';
+import { useCollection, useSetCurrentPixel } from '@/features/collection/useCollection';
 
 /**
  * MY — a personal space, not a settings screen.
@@ -35,7 +36,9 @@ export default function MyRoute() {
 
   const me = useMe();
   const todayStatus = useTodayStatus();
-  const history = useMyPixels();
+  const history = useMyHistory();
+  const collection = useCollection();
+  const setCurrentPixel = useSetCurrentPixel();
 
   const recent =
     history.data?.pages.flatMap((page) => page.items).slice(0, 8) ?? [];
@@ -63,7 +66,7 @@ export default function MyRoute() {
     );
   }
 
-  const todayPost = todayStatus.data?.myTodayPost ?? null;
+  const myToday = todayStatus.data?.myTodayStatus ?? null;
 
   return (
     <Screen
@@ -107,12 +110,12 @@ export default function MyRoute() {
         >
           <PixelCharacter
             uri={
-              todayPost?.characterImageUrl ??
+              myToday?.characterImageUrl ??
               user.representativeCharacterUrl
             }
             size={140}
             idle
-            accessibilityLabel="내 대표 PIXME"
+            accessibilityLabel="내 Current PIXME"
           />
         </View>
 
@@ -125,7 +128,24 @@ export default function MyRoute() {
           </Text>
         ) : null}
 
-        {!todayPost ? (
+        {myToday ? (
+          <View style={styles.todayStatusRow}>
+            {myToday.mood || myToday.message ? (
+              <Text variant="caption" tone="secondary" align="center" style={styles.todayStatusText}>
+                {myToday.mood ? `${myToday.mood} ` : ''}
+                {myToday.message ?? ''}
+              </Text>
+            ) : null}
+            <Button
+              label="오늘 상태 바꾸기"
+              variant="secondary"
+              size="sm"
+              fullWidth={false}
+              onPress={() => router.push('/status-edit')}
+              style={styles.todayCta}
+            />
+          </View>
+        ) : (
           <Button
             label={copy.today.myPixelMissingCta}
             size="md"
@@ -133,7 +153,7 @@ export default function MyRoute() {
             onPress={() => router.push('/create')}
             style={styles.todayCta}
           />
-        ) : null}
+        )}
       </View>
 
       {/* counters */}
@@ -203,6 +223,53 @@ export default function MyRoute() {
 
       <Divider style={styles.divider} />
 
+      {/* PIXME Collection */}
+      <View style={styles.collectionHeader}>
+        <Text variant="title3">PIXME Collection</Text>
+        <Button
+          label="새 PIXME 만들기"
+          variant="ghost"
+          size="sm"
+          onPress={() => router.push('/create')}
+        />
+      </View>
+
+      {collection.data && collection.data.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.collectionRow}
+        >
+          {collection.data.map((character) => (
+            <Pressable
+              key={character.id}
+              accessibilityRole="button"
+              accessibilityLabel={character.isCurrent ? '현재 사용 중인 PIXME' : '이 PIXME로 바꾸기'}
+              disabled={character.isCurrent || setCurrentPixel.isPending}
+              onPress={() => setCurrentPixel.mutate(character.id)}
+              style={({ pressed }) => [
+                styles.collectionItem,
+                {
+                  backgroundColor: colors.surfaceSubtle,
+                  borderColor: character.isCurrent ? colors.accent : colors.border,
+                  borderWidth: character.isCurrent ? 2 : StyleSheet.hairlineWidth,
+                  opacity: pressed ? opacity.pressed : 1,
+                },
+              ]}
+            >
+              <PixelCharacter uri={character.characterImageUrl} size={72} />
+              {character.isCurrent ? (
+                <Text variant="micro" tone="accent" style={styles.collectionLabel}>
+                  현재
+                </Text>
+              ) : null}
+            </Pressable>
+          ))}
+        </ScrollView>
+      ) : null}
+
+      <Divider style={styles.divider} />
+
       {/* recent history */}
       <Pressable
         accessibilityRole="button"
@@ -228,12 +295,12 @@ export default function MyRoute() {
         />
       ) : (
         <View style={styles.grid}>
-          {recent.map((post) => (
+          {recent.map((status) => (
             <Pressable
-              key={post.id}
+              key={status.id}
               accessibilityRole="button"
-              accessibilityLabel={`${post.postDate}의 PIXME`}
-              onPress={() => router.push(`/pixel/${post.id}`)}
+              accessibilityLabel={`${status.statusDate}의 PIXME`}
+              onPress={() => router.push(`/daily-status/${status.id}`)}
               style={({ pressed }) => [
                 styles.gridItem,
                 {
@@ -243,9 +310,9 @@ export default function MyRoute() {
                 },
               ]}
             >
-              <PixelCharacter uri={post.characterImageUrl} size={64} />
+              <PixelCharacter uri={status.characterImageUrl} size={64} />
               <Text variant="micro" tone="tertiary">
-                {post.postDate.slice(5).replace('-', '.')}
+                {status.statusDate.slice(5).replace('-', '.')}
               </Text>
             </Pressable>
           ))}
@@ -288,6 +355,23 @@ const styles = StyleSheet.create({
   nickname: { marginTop: spacing.base },
   bio: { marginTop: spacing.xs, maxWidth: 280 },
   todayCta: { marginTop: spacing.base, minWidth: 180 },
+  todayStatusRow: { alignItems: 'center' },
+  todayStatusText: { marginTop: spacing.sm, maxWidth: 280 },
+  collectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.xl,
+  },
+  collectionRow: { paddingTop: spacing.base, paddingRight: spacing.lg },
+  collectionItem: {
+    width: 96,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    marginRight: spacing.sm,
+    borderRadius: radius.md,
+  },
+  collectionLabel: { marginTop: spacing.xxs },
   stats: {
     flexDirection: 'row',
     alignItems: 'center',
