@@ -32,3 +32,4 @@ build/
 .idea/
 .vscode/
 *.iml
+apps/server/tmp/

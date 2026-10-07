@@ -160,7 +160,9 @@ pixme:
       # characters drift from the house style.
       required: ${PIXME_MASTER_REFERENCE_REQUIRED:false}
     openai:
-      api-key: ${PIXME_OPENAI_API_KEY:}
+      # PIXME_OPENAI_API_KEY takes priority; OPENAI_API_KEY is a fallback for
+      # environments that only export the generic name.
+      api-key: ${PIXME_OPENAI_API_KEY:${OPENAI_API_KEY:}}
       base-url: ${PIXME_OPENAI_BASE_URL:https://api.openai.com/v1}
       analysis-model: ${PIXME_OPENAI_ANALYSIS_MODEL:gpt-5}
       image-model: ${PIXME_OPENAI_IMAGE_MODEL:gpt-image-1}
