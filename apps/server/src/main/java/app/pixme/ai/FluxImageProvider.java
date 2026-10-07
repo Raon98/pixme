@@ -94,20 +94,31 @@ public class FluxImageProvider implements PixelImageProvider {
     }
 
     private GeneratedCharacter render(GenerationRequest request, ImageAnalysis analysis) {
-        String prompt = prompts.characterPrompt(analysis, request.style());
+        String prompt = prompts.characterPrompt(
+                analysis, request.style(), request.spec(), request.hasMasterReference());
+
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("prompt", prompt);
+        // input_image is the user's photo; Kontext keeps garment shape from it
+        // well, while the prompt holds colours and layering steady.
+        body.put("input_image", Base64.getEncoder().encodeToString(request.sourceImage()));
+        if (request.hasMasterReference()) {
+            // Second reference slot carries the house style as a picture.
+            body.put(
+                    "input_image_2",
+                    Base64.getEncoder().encodeToString(request.masterReference()));
+        }
+        body.put("aspect_ratio", "1:1");
+        body.put("output_format", "png");
+        body.put("seed", request.seed());
+        body.put("safety_tolerance", 2);
+        body.put("prompt_upsampling", false);
 
         try {
             JsonNode submitted = client.post()
                     .uri("/" + config.flux().imageModel())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(Map.of(
-                            "prompt", prompt,
-                            "input_image", Base64.getEncoder().encodeToString(request.sourceImage()),
-                            "aspect_ratio", "1:1",
-                            "output_format", "png",
-                            "seed", request.seed(),
-                            "safety_tolerance", 2,
-                            "prompt_upsampling", false))
+                    .body(body)
                     .retrieve()
                     .body(JsonNode.class);
 

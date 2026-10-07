@@ -21,6 +21,22 @@ const log = logger('generation');
 const POLL_INTERVAL_MS = 1500;
 const POLL_TIMEOUT_MS = 120_000;
 
+/**
+ * Idempotency key for one generation attempt.
+ *
+ * <p>Deliberately derived rather than random: two taps of the same button
+ * produce the same key, so the server returns the generation it already made
+ * instead of charging again. A genuinely new attempt changes `retryCount`, and
+ * therefore the key.
+ */
+function attemptKey(
+  source: string | null,
+  retryCount: number,
+  isRetry: boolean,
+): string {
+  return `${isRetry ? 'retry' : 'start'}:${source ?? 'none'}:${retryCount}`;
+}
+
 export type FlowPhase =
   | 'idle'
   | 'uploading'
@@ -228,15 +244,27 @@ export function useGenerationFlow() {
         // An upload is single-use, so a retry re-renders the previous
         // generation's stored analysis instead of replaying the upload.
         const previousGenerationId = currentDraft.generation?.id ?? null;
+
+        // Deterministic per attempt, so a double-tapped button or a network
+        // retry resolves to the same generation server-side instead of
+        // spending a second allowance.
+        const clientRequestId = attemptKey(
+          uploadId ?? previousGenerationId,
+          currentDraft.retryCount,
+          options?.isRetry ?? false,
+        );
+
         const generation =
           options?.isRetry && previousGenerationId
             ? await pixelsApi.retryGeneration({
                 generationId: previousGenerationId,
                 style: currentDraft.style,
+                clientRequestId,
               })
             : await pixelsApi.startGeneration({
                 uploadId: uploadId as string,
                 style: currentDraft.style,
+                clientRequestId,
               });
 
         setGeneration(generation);

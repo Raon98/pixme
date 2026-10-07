@@ -41,6 +41,15 @@ docs/
 
 ## Running it
 
+### Character reference
+
+Before anything looks right, drop the official character image at
+`apps/server/src/main/resources/pixme/master-character-v1.png`. It is sent to
+the AI provider as the style reference on every generation, and the server
+measures it at startup to fix the character geometry that every output is
+conformed to. See that directory's README; the server runs without it but warns
+loudly, and characters drift.
+
 ### Backend
 
 ```bash

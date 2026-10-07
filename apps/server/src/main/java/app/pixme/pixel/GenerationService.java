@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import app.pixme.ai.AiProviderRegistry;
+import app.pixme.ai.MasterCharacterReference;
 import app.pixme.ai.PixelStyle;
 import app.pixme.common.ApiException;
 import app.pixme.common.ErrorCode;
@@ -21,6 +22,7 @@ import app.pixme.pixel.repository.PixelGenerationRepository;
 import app.pixme.pixel.repository.PixelUploadRepository;
 import app.pixme.storage.StorageService;
 import app.pixme.store.CreditService;
+import app.pixme.store.domain.SpendKind;
 import app.pixme.store.repository.UserUnlockRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +59,7 @@ public class GenerationService {
     private final PixelUploadRepository uploadRepository;
     private final UserUnlockRepository unlockRepository;
     private final AiProviderRegistry providers;
+    private final MasterCharacterReference masterReference;
     private final StorageService storage;
     private final CreditService credits;
     private final ServiceClock clock;
@@ -70,6 +73,7 @@ public class GenerationService {
             PixelUploadRepository uploadRepository,
             UserUnlockRepository unlockRepository,
             AiProviderRegistry providers,
+            MasterCharacterReference masterReference,
             StorageService storage,
             CreditService credits,
             ServiceClock clock,
@@ -81,6 +85,7 @@ public class GenerationService {
         this.uploadRepository = uploadRepository;
         this.unlockRepository = unlockRepository;
         this.providers = providers;
+        this.masterReference = masterReference;
         this.storage = storage;
         this.credits = credits;
         this.clock = clock;
@@ -142,7 +147,17 @@ public class GenerationService {
      * cap, allowance) is checked before any provider call or charge.
      */
     @Transactional
-    public PixelGeneration start(UUID userId, UUID uploadId, PixelStyle style) {
+    public PixelGeneration start(
+            UUID userId, UUID uploadId, PixelStyle style, String clientRequestId) {
+
+        // Idempotency first: a double-tapped button or a network retry must
+        // resolve to the generation we already created, never to a second
+        // charge.
+        Optional<PixelGeneration> existing = findByClientRequest(userId, clientRequestId);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
         rateLimiter.check(
                 "generation",
                 userId,
@@ -172,12 +187,12 @@ public class GenerationService {
                 properties.ai().promptVersion(),
                 today,
                 (short) (todayCount + 1));
+        generation.setClientRequestId(clientRequestId);
+        generation.setReferenceVersion(masterReference.version());
 
         // Charge before dispatching: two parallel requests must not both see
         // the last credit as available.
-        CreditService.SpendKind spend = credits.spendForGeneration(userId, generation.getId());
-        generation.setUsedFreeGeneration(spend == CreditService.SpendKind.FREE_DAILY);
-        generation.setUsedCredit(spend == CreditService.SpendKind.PAID_CREDIT);
+        generation.recordSpend(credits.spendForGeneration(userId, generation.getId()));
 
         upload.markConsumed();
         uploadRepository.save(upload);
@@ -198,8 +213,33 @@ public class GenerationService {
      * faster, and it keeps the outfit identical while only the rendering
      * varies, which is what the user is actually asking for.
      */
+    /**
+     * Re-renders an existing generation's analysis — the "다시 만들어보기" path.
+     *
+     * <p>Reuses the stored analysis rather than re-reading the photo: cheaper,
+     * faster, and it keeps the outfit identical while only the render varies,
+     * which is what the user is actually asking for.
+     *
+     * <p>When this is a retry of the account's <em>first</em> character, it
+     * spends the free first-retry entitlement. That retry exists to stop
+     * someone leaving because the very first AI result disappointed them, so it
+     * is deliberately scoped to that one moment and not reachable later.
+     */
     @Transactional
-    public PixelGeneration retry(UUID userId, UUID sourceGenerationId, PixelStyle style) {
+    public PixelGeneration retry(
+            UUID userId, UUID sourceGenerationId, PixelStyle style, String clientRequestId) {
+
+        Optional<PixelGeneration> existing = findByClientRequest(userId, clientRequestId);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
+        rateLimiter.check(
+                "generation",
+                userId,
+                properties.rateLimit().generationPerHour(),
+                Duration.ofHours(1));
+
         PixelGeneration source = generationRepository
                 .findByIdAndUserId(sourceGenerationId, userId)
                 .orElseThrow(() -> ApiException.notFound("생성 기록"));
@@ -221,16 +261,58 @@ public class GenerationService {
                 today,
                 (short) (todayCount + 1));
         generation.setAnalysisJson(source.getAnalysisJson());
+        generation.setClientRequestId(clientRequestId);
+        generation.setReferenceVersion(masterReference.version());
+        // Lineage, so the result screen can offer "this one or the other one?".
+        generation.setRetryOfGenerationId(rootOf(source));
 
-        CreditService.SpendKind spend = credits.spendForGeneration(userId, generation.getId());
-        generation.setUsedFreeGeneration(spend == CreditService.SpendKind.FREE_DAILY);
-        generation.setUsedCredit(spend == CreditService.SpendKind.PAID_CREDIT);
+        // The free retry only applies to a retry of the account's first
+        // character; anything else falls through to the normal spend order.
+        boolean retryingFirstCharacter =
+                source.getSpendKind() == SpendKind.FREE_FIRST
+                        || source.getSpendKind() == SpendKind.FREE_FIRST_RETRY;
+
+        generation.recordSpend(
+                retryingFirstCharacter
+                        ? credits.spendForFirstRetry(userId, generation.getId())
+                        : credits.spendForGeneration(userId, generation.getId()));
 
         generationRepository.save(generation);
 
         events.publishEvent(new GenerationQueuedEvent(generation.getId()));
 
         return generation;
+    }
+
+    /** Candidates the user may choose between: a generation and its retries. */
+    @Transactional(readOnly = true)
+    public List<PixelGeneration> candidatesFor(UUID userId, UUID generationId) {
+        PixelGeneration generation = get(userId, generationId);
+        UUID root = rootOf(generation);
+
+        List<PixelGeneration> candidates = new java.util.ArrayList<>();
+        generationRepository.findByIdAndUserId(root, userId).ifPresent(candidates::add);
+        candidates.addAll(
+                generationRepository.findByUserIdAndRetryOfGenerationId(userId, root));
+
+        return candidates.stream()
+                .filter(candidate -> candidate.getGeneratedObjectKey() != null)
+                .sorted(java.util.Comparator.comparing(PixelGeneration::getCreatedAt))
+                .toList();
+    }
+
+    /** Retries chain to the original, not to each other. */
+    private UUID rootOf(PixelGeneration generation) {
+        return generation.getRetryOfGenerationId() != null
+                ? generation.getRetryOfGenerationId()
+                : generation.getId();
+    }
+
+    private Optional<PixelGeneration> findByClientRequest(UUID userId, String clientRequestId) {
+        if (clientRequestId == null || clientRequestId.isBlank()) {
+            return Optional.empty();
+        }
+        return generationRepository.findByUserIdAndClientRequestId(userId, clientRequestId);
     }
 
     @Transactional(readOnly = true)

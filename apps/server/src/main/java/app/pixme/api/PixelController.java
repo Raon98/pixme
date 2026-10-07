@@ -86,7 +86,10 @@ public class PixelController {
             @Valid @RequestBody PixelDtos.StartGenerationRequest request) {
 
         PixelGeneration generation = generationService.start(
-                principal.userId(), parseUuid(request.uploadId()), parseStyle(request.style()));
+                principal.userId(),
+                parseUuid(request.uploadId()),
+                parseStyle(request.style()),
+                request.clientRequestId());
         return assembler.generation(generation);
     }
 
@@ -98,7 +101,8 @@ public class PixelController {
         PixelGeneration generation = generationService.retry(
                 principal.userId(),
                 parseUuid(request.generationId()),
-                parseStyle(request.style()));
+                parseStyle(request.style()),
+                request.clientRequestId());
         return assembler.generation(generation);
     }
 
@@ -106,6 +110,18 @@ public class PixelController {
     public PixelDtos.GenerationResponse generation(
             @CurrentUser AuthPrincipal principal, @PathVariable UUID generationId) {
         return assembler.generation(generationService.get(principal.userId(), generationId));
+    }
+
+    /**
+     * A generation and its retries, so the result screen can let the user pick
+     * between the first character and the one the free retry produced.
+     */
+    @GetMapping("/generations/{generationId}/candidates")
+    public List<PixelDtos.GenerationResponse> candidates(
+            @CurrentUser AuthPrincipal principal, @PathVariable UUID generationId) {
+        return generationService.candidatesFor(principal.userId(), generationId).stream()
+                .map(assembler::generation)
+                .toList();
     }
 
     /* ------------------------------------------------------------ publish */
@@ -152,8 +168,11 @@ public class PixelController {
 
         return new PixelDtos.TodayStatusResponse(
                 todayPost == null ? null : assembler.post(principal.userId(), todayPost),
-                allowance.freeAvailable(),
+                allowance.firstGenerationAvailable(),
+                allowance.firstRetryAvailable(),
+                allowance.bonusFreeCredits(),
                 allowance.creditBalance(),
+                allowance.nextGenerationIsFree(),
                 pendingGenerationId);
     }
 

@@ -64,8 +64,19 @@ public record PixmeProperties(
             String promptVersion,
             Duration requestTimeout,
             int maxAttempts,
+            MasterReference masterReference,
             OpenAi openai,
             Flux flux) {
+
+        /**
+         * The official character reference sent as "Image B" on every
+         * generation, and the source of the fixed character geometry.
+         *
+         * @param required fail startup when the asset is missing — set true in
+         *     production so a bad deploy can't quietly ship drifting characters
+         */
+        public record MasterReference(
+                String resource, String mimeType, String version, boolean required) {}
 
         public record OpenAi(
                 String apiKey,
@@ -77,7 +88,13 @@ public record PixmeProperties(
         public record Flux(String apiKey, String baseUrl, String imageModel) {}
     }
 
-    public record Generation(int freePerDay, int maxPerDay, int maxCandidatesPerDay) {}
+    /**
+     * Free generation is an onboarding grant, not a daily allowance: the first
+     * generation, one retry of that first result, and one bonus credit.
+     * Everything after that is paid.
+     */
+    public record Generation(
+            int onboardingBonusCredits, int maxPerDay, int maxCandidatesPerDay) {}
 
     public record Feed(
             int pageSize,

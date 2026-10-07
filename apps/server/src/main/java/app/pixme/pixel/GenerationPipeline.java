@@ -6,7 +6,9 @@ import java.util.UUID;
 import app.pixme.ai.AiProviderRegistry;
 import app.pixme.ai.GeneratedCharacter;
 import app.pixme.ai.GenerationRequest;
+import app.pixme.ai.CharacterNormalizer;
 import app.pixme.ai.ImageAnalysis;
+import app.pixme.ai.MasterCharacterReference;
 import app.pixme.ai.PixelImageProvider;
 import app.pixme.ai.SafetyVerdict;
 import app.pixme.common.ApiException;
@@ -43,6 +45,8 @@ public class GenerationPipeline {
 
     private final PixelGenerationRepository generationRepository;
     private final AiProviderRegistry providers;
+    private final MasterCharacterReference masterReference;
+    private final CharacterNormalizer normalizer;
     private final StorageService storage;
     private final CreditService credits;
     private final ObjectMapper objectMapper;
@@ -51,12 +55,16 @@ public class GenerationPipeline {
     public GenerationPipeline(
             PixelGenerationRepository generationRepository,
             AiProviderRegistry providers,
+            MasterCharacterReference masterReference,
+            CharacterNormalizer normalizer,
             StorageService storage,
             CreditService credits,
             ObjectMapper objectMapper,
             GenerationNotifier notifier) {
         this.generationRepository = generationRepository;
         this.providers = providers;
+        this.masterReference = masterReference;
+        this.normalizer = normalizer;
         this.storage = storage;
         this.credits = credits;
         this.objectMapper = objectMapper;
@@ -120,8 +128,13 @@ public class GenerationPipeline {
             GenerationRequest request = new GenerationRequest(
                     generationId,
                     generation.getUserId(),
+                    // Image A — who the person is and what they wore.
                     original,
                     "image/jpeg",
+                    // Image B — how a PIXME is built.
+                    masterReference.bytes(),
+                    masterReference.mimeType(),
+                    masterReference.spec(),
                     generation.getStyle(),
                     analysis,
                     generation.getPromptVersion(),
@@ -135,8 +148,14 @@ public class GenerationPipeline {
 
             /* --- persist ---------------------------------------------------- */
             updateProgress(generationId, (short) 90);
+
+            // Conform the render to the reference geometry. The prompt asks for
+            // consistent scale, centring and foot position; this guarantees
+            // them, which is what keeps a crowd in the square coherent.
+            byte[] normalized = normalizer.normalize(character.image());
+
             String objectKey = S3StorageService.characterKey(generation.getUserId(), generationId);
-            storage.putCharacter(objectKey, character.image(), character.mimeType());
+            storage.putCharacter(objectKey, normalized, character.mimeType());
 
             complete(generationId, objectKey, character);
             notifier.onGenerationCompleted(generation.getUserId(), generationId);
@@ -189,16 +208,13 @@ public class GenerationPipeline {
 
         generation.markFailed(reason, message);
 
-        if (generation.getStatus().warrantsRefund()) {
-            if (generation.isUsedCredit() && generation.getCreditRefundedAt() == null) {
-                if (credits.refundForGeneration(generation.getUserId(), generationId)) {
-                    generation.markRefunded();
-                }
-            } else if (generation.isUsedFreeGeneration()
-                    && generation.getCreditRefundedAt() == null) {
-                credits.restoreFreeGeneration(generation.getUserId());
-                generation.markRefunded();
-            }
+        // Return exactly what was spent — free first generation, free retry,
+        // bonus credit or a paid credit. Recording the kind at spend time is
+        // what makes this possible; a boolean could not tell them apart.
+        if (generation.isRefundable()
+                && credits.refund(
+                        generation.getUserId(), generationId, generation.getSpendKind())) {
+            generation.markRefunded();
         }
 
         generationRepository.save(generation);

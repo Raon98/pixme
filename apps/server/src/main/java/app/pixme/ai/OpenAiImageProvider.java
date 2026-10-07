@@ -12,8 +12,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -172,25 +175,27 @@ public class OpenAiImageProvider implements PixelImageProvider {
         return render(request, analysis);
     }
 
+    /**
+     * Renders the character.
+     *
+     * <p>When the Master Character Reference is installed this uses the
+     * <em>edits</em> endpoint with two image inputs — the user's photo and the
+     * reference — because that is the only way to give the model the house
+     * style as a picture rather than as an adjective. Text alone does not hold a
+     * character family together across thousands of renders.
+     *
+     * <p>Without the reference it falls back to text-only generation, which
+     * still works but drifts; the service logs a warning at startup in that
+     * case.
+     */
     private GeneratedCharacter render(GenerationRequest request, ImageAnalysis analysis) {
-        String prompt = prompts.characterPrompt(analysis, request.style());
+        String prompt = prompts.characterPrompt(
+                analysis, request.style(), request.spec(), request.hasMasterReference());
 
         try {
-            JsonNode response = client.post()
-                    .uri("/images/generations")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(Map.of(
-                            "model", config.openai().imageModel(),
-                            "prompt", prompt,
-                            "n", 1,
-                            "size", "1024x1024",
-                            // Transparency is non-negotiable: characters are
-                            // composited onto feed cards and the square scene.
-                            "background", "transparent",
-                            "output_format", "png",
-                            "quality", "high"))
-                    .retrieve()
-                    .body(JsonNode.class);
+            JsonNode response = request.hasMasterReference()
+                    ? renderWithReferences(request, prompt)
+                    : renderFromPromptOnly(request, prompt);
 
             String base64 = response == null
                     ? null
@@ -213,6 +218,66 @@ public class OpenAiImageProvider implements PixelImageProvider {
             log.warn("image generation failed for generation={}", request.generationId(), exception);
             throw new ApiException(ErrorCode.INTERNAL_ERROR, "픽셀 캐릭터를 만들지 못했어요.");
         }
+    }
+
+    /** Image A (the photo) + Image B (the reference), as multipart. */
+    private JsonNode renderWithReferences(GenerationRequest request, String prompt) {
+        MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+        form.add("model", config.openai().imageModel());
+        form.add("prompt", prompt);
+        form.add("n", "1");
+        form.add("size", "1024x1024");
+        // Transparency is non-negotiable: characters composite onto feed cards
+        // and onto the square scene.
+        form.add("background", "transparent");
+        form.add("output_format", "png");
+        form.add("quality", "high");
+
+        // Order matters — the prompt refers to them as Image A and Image B.
+        form.add("image[]", namedPart(request.sourceImage(), "image-a-user-photo", request.sourceMimeType()));
+        form.add(
+                "image[]",
+                namedPart(
+                        request.masterReference(),
+                        "image-b-pixme-master-reference",
+                        request.masterReferenceMimeType()));
+
+        return client.post()
+                .uri("/images/edits")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(form)
+                .retrieve()
+                .body(JsonNode.class);
+    }
+
+    private JsonNode renderFromPromptOnly(GenerationRequest request, String prompt) {
+        return client.post()
+                .uri("/images/generations")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of(
+                        "model", config.openai().imageModel(),
+                        "prompt", prompt,
+                        "n", 1,
+                        "size", "1024x1024",
+                        "background", "transparent",
+                        "output_format", "png",
+                        "quality", "high"))
+                .retrieve()
+                .body(JsonNode.class);
+    }
+
+    private ByteArrayResource namedPart(byte[] content, String filename, String mimeType) {
+        String extension = switch (mimeType == null ? "" : mimeType) {
+            case "image/png" -> ".png";
+            case "image/webp" -> ".webp";
+            default -> ".jpg";
+        };
+        return new ByteArrayResource(content) {
+            @Override
+            public String getFilename() {
+                return filename + extension;
+            }
+        };
     }
 
     private static String dataUrl(byte[] image, String mimeType) {

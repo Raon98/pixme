@@ -55,10 +55,36 @@ public record ImageAnalysis(
             /** bangs | side-part | centre-part | none */
             String fringe) {}
 
+    /**
+     * Drawable facial geometry.
+     *
+     * <p>The character should look like the person — their eye shape, brows and
+     * mouth, not a stock face. So this describes <em>shape</em>, which a pixel
+     * artist would need, while still refusing to record age, ethnicity or any
+     * attractiveness judgement, which nothing in the product uses.
+     *
+     * <p>How far these features get simplified is fixed by the Master Character
+     * Reference, not by this record: shape comes from the photo, simplification
+     * level comes from the reference.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Face(
-            /** Expression only — never an attractiveness or ethnicity judgement. */
+            /** False when no face is visible — then nothing below is invented. */
+            boolean faceVisible,
             String expression,
+            /** round | oval | long | square | heart */
+            String faceShape,
+            /** almond | round | upturned | downturned | monolid | hooded */
+            String eyeShape,
+            /** small | medium | large */
+            String eyeSize,
+            String eyeColor,
+            /** straight | arched | angled | soft | thick | thin */
+            String browShape,
+            /** thin | full | small | wide */
+            String lipShape,
+            /** Plain description; the hex belongs in paletteHints. */
+            String skinTone,
             boolean glasses,
             String glassesStyle,
             boolean facialHair,

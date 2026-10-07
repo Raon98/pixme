@@ -98,6 +98,11 @@ public class InMemoryStorageService implements StorageService {
         return characters.containsKey(objectKey);
     }
 
+    /** Lets a test assert on the bytes that were actually stored. */
+    public byte[] character(String objectKey) {
+        return characters.get(objectKey);
+    }
+
     public int originalCount() {
         return originals.size();
     }

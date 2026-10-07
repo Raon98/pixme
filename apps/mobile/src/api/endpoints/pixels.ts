@@ -6,7 +6,7 @@ import type {
   PixelPost,
   PixelPostSummary,
   PublishPixelRequest,
-  PixelStyle,
+  RetryGenerationRequest,
   StartGenerationRequest,
   TodayStatus,
   UploadTicket,
@@ -27,8 +27,15 @@ export const pixelsApi = {
    * through this endpoint rather than replaying `startGeneration`. It is also
    * cheaper and keeps the outfit identical while the rendering varies.
    */
-  retryGeneration: (body: { generationId: string; style: PixelStyle }) =>
+  retryGeneration: (body: RetryGenerationRequest) =>
     post<PixelGeneration>('/pixels/generate/retry', body),
+
+  /**
+   * A generation and its retries, so the first-character result screen can let
+   * the user choose between the two candidates.
+   */
+  candidates: (generationId: string) =>
+    get<PixelGeneration[]>(`/pixels/generations/${generationId}/candidates`),
 
   /** Step 3 — poll until COMPLETED / FAILED / REJECTED_UNSAFE. */
   generation: (generationId: string) =>

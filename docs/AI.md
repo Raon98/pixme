@@ -4,21 +4,77 @@ The character is the product's core asset. Everything here exists to make two
 promises true: **the character wears what the person actually wore**, and
 **every PIXME looks like it comes from the same world**.
 
+## The Master Character Reference
+
+The official character image is the standard. It lives at
+`apps/server/src/main/resources/pixme/master-character-v1.png` and does two
+jobs:
+
+1. **It is sent to the provider as "Image B" on every generation.** Text alone
+   cannot hold a character family together across thousands of renders; a
+   picture can.
+2. **Its geometry is measured at startup** and becomes `CharacterSpec`. Swapping
+   the file re-fixes the spec — the numbers are never invented in code, only
+   defaulted when the file is missing.
+
+Every generation records `reference_version`, so changing the reference is as
+comparable after the fact as changing the prompt.
+
+## Fixed vs. variable
+
+This is the core rule: **the person and the clothes change, the skeleton never
+does.**
+
+| Comes from the user's photo (Image A) | Comes from the reference (Image B) |
+| --- | --- |
+| hairstyle, hair colour | overall height and width ratio |
+| **eye shape, size, brow shape, lip shape, face outline** | head-to-body ratio, "slightly oversized" amount |
+| skin tone, expression | face size, torso size, limb thickness |
+| every visible garment, its colour and pattern | hand and foot simplification level |
+| layering order | silhouette |
+| bag, glasses, hat, accessories | pixel size and density |
+| shoes | **how far features are simplified** |
+| overall mood | standing pose, canvas occupancy, headroom, foot baseline, centring, shading level |
+
+Note where the face sits: its **shape** follows the person — the character
+should look like them — while its **rendering** is fixed. Large pixel eyes with
+a single highlight, a small mouth, subtle blush: that technique never changes,
+but the eyes are *their* eyes.
+
 ## Art direction
 
-Shared by every style, so a crowd in the square reads as one place:
+Measured from the reference and shared by every style:
 
 - Original pixel art, redrawn from scratch — never a downscaled photo.
 - One consistent pixel grid at one scale.
-- Slightly oversized head, compact body (≈1 : 2.6). Cute, not childish.
-- Clean deliberate edges. At most four shades per garment, flat fills, one
-  shadow tone. No gradients, no dithering noise, no blur.
-- Modern, slightly Y2K sensibility.
+- Slightly oversized head: head and hair ≈31% of total height, roughly 3.3
+  heads tall. Cute, not chibi, not realistic.
+- The character fills ≈93% of the canvas height, centred, soles on the baseline.
+- Clean deliberate edges, no anti-aliasing or blur. Limited palette per garment
+  with restrained shading for folds, plus a silhouette outline.
+- Large expressive eyes with one highlight, soft brows, small mouth, subtle
+  blush; nose minimal or omitted.
 - Readable at 72px (square crowd) and at 300px (feed card).
-- **Transparent background**, always. Characters composite onto the feed card
-  stage and the square scene, so the asset must never carry its own backdrop.
+- **Transparent background**, always — characters composite onto the feed card
+  stage and the square scene. The reference is exported on a flat background
+  with a ground shadow and the prompt says explicitly that this is *not* part of
+  the standard.
 - Never: photorealism, 3D, anime/manga, smooth vector, exaggerated chibi, any
   recognisable existing character, multiple figures, or a scene.
+
+## Enforcement, not just instruction
+
+A prompt can *ask* for consistent scale, centring and foot position. It cannot
+guarantee them, and models drift — one render comes back 8% smaller, the next
+sits 30px off-centre. In a square full of characters that reads immediately as
+"these are from different apps".
+
+So `CharacterNormalizer` runs on every result and deterministically trims to the
+alpha bounding box, scales with **nearest-neighbour** to the spec height (clamped
+if unusually wide), and places the character centred with its soles on the
+baseline. The art is never touched — only the frame it sits in. If
+normalisation fails for any reason the raw render is used, because a processing
+bug must never cost someone a generation.
 
 Purchasable styles (`Y2K_PIXEL`, `BIT_16`, `RETRO_PC`, `ARCADE`, `MINI_PIXEL`,
 `SOFT_PIXEL`) vary palette, pixel density and outline weight **on top of** the
@@ -28,7 +84,7 @@ same construction rules. They are variations, not different universes.
 ## Two steps, not one
 
 ```
-photo ──► moderation ──► analysis (structured JSON) ──► render ──► PNG
+photo ──► moderation ──► analysis (structured JSON) ──► render (A + B) ──► normalise ──► PNG
 ```
 
 Analysis is deliberately separate from rendering:
@@ -49,13 +105,19 @@ Analysis is deliberately separate from rendering:
 Every field is nullable **by design**. A selfie legitimately has no bottoms and
 no shoes, and absence is the signal the renderer needs.
 
-Two prohibitions in the analysis prompt:
+Three rules in the analysis prompt:
 
 1. **Only report what is visible.** If the frame stops at the waist, emit no
-   `BOTTOM` garment. If feet aren't visible, `footwear` is null. Never guess.
-2. **Describe clothes, not people.** No age, ethnicity, body shape or
-   attractiveness — the product has no use for any of it and should not collect
-   it. Only hairstyle, glasses, facial hair and expression.
+   `BOTTOM` garment. If feet aren't visible, `footwear` is null. If no face is
+   visible, `faceVisible` is false and nothing about the face is invented.
+   Never guess.
+2. **Describe shape precisely enough to be recognisable.** Eye shape and size,
+   brow shape, lip shape, face outline, skin tone — what a portrait artist needs.
+   "Grey with black wavy horizontal stripes" is useful; "patterned top" is not.
+3. **Shapes, not profiling.** No age, ethnicity, nationality, body weight or
+   attractiveness. The line is that "almond eyes, straight brows" is a drawing
+   instruction while "early-20s, attractive" is a judgement the product has no
+   use for.
 
 Layering is explicit: an open jacket over a tee is two garments with different
 `layer` values, and the prompt lists them innermost-first. Without that, layered
@@ -69,9 +131,14 @@ wrong produces the one error users notice instantly — "I wasn't wearing that."
 | Framing | Instruction |
 | --- | --- |
 | `FULL_BODY` | Draw head to feet; the whole outfit is visible. |
-| `UPPER_BODY` | Draw head to just below the hips and fade out. **Do NOT invent** trousers, skirts, legs or shoes. |
-| `SELFIE` | Draw a bust — head, shoulders, visible top only. **Do NOT invent** a lower body. |
-| `UNKNOWN` | Draw only what was described. Invent no garment. |
+| `UPPER_BODY` | Still a full-body character — but keep the lower half plain and neutral in a colour from the visible palette. **Do NOT invent** a specific garment, pattern or footwear. |
+| `SELFIE` | Same: full body, everything below the visible top plain and neutral. **Do NOT invent** specifics. |
+| `UNKNOWN` | Draw only the garments described; anything else stays plain. |
+
+Note the resolution for a partial photo is "neutral below", not "crop to a
+bust". Every character in the square has to be a full-body sprite of the same
+height — a bust would break both the crowd and the normaliser — so the honest
+answer is a complete character that visibly declines to make anything up.
 
 The prompt also states an explicit priority order: garment identity and colour
 first, then hair, then accessories, then mood — and forbids "improving",
@@ -81,8 +148,8 @@ restyling or accessorising the outfit.
 
 ## Prompt versioning
 
-`pixme.ai.prompt-version` (currently `PIXME_V1`) is stored on every generation
-alongside the provider, model and analysis JSON. Changing the art direction is
+`pixme.ai.prompt-version` (currently `PIXME_CHARACTER_V1`) is stored on every
+generation alongside the provider, model, reference version and analysis JSON. Changing the art direction is
 therefore measurable: re-run stored analyses under a new version and compare,
 rather than guessing whether it improved.
 
@@ -100,8 +167,8 @@ interface PixelImageProvider {
 
 | Provider | Notes |
 | --- | --- |
-| `openai` | Moderation → vision analysis → image generation with transparent background. |
-| `flux` | Image-to-image (Kontext), which preserves garment shape well; asynchronous, so it polls and surfaces a timeout as a normal failure. Delegates moderation and analysis to the OpenAI provider, since BFL exposes neither. |
+| `openai` | Moderation → vision analysis → `images/edits` with **two image inputs** (photo + reference) and a transparent background. Falls back to text-only generation when the reference is missing. |
+| `flux` | Image-to-image (Kontext) with the photo as `input_image` and the reference as `input_image_2`; preserves garment shape well. Asynchronous, so it polls and surfaces a timeout as a normal failure. Delegates moderation and analysis to the OpenAI provider, since BFL exposes neither. |
 | `stub` | Draws a character procedurally. Honours the framing rule — a selfie analysis yields a bust, a full-body one yields legs and shoes — because framing is the behaviour most likely to regress. Used by `local` and by the test suite. |
 
 All three are registered; `pixme.ai.provider` selects one. `AiProviderRegistry`
@@ -124,7 +191,8 @@ outage would take the product down. The failure is logged.
 
 ## Cost control
 
-- One free generation per user per day; extras consume a paid credit.
+- Free generation is an onboarding grant only — first generation, one free
+  retry of that first result, one bonus credit — then paid. See `PRODUCT.md`.
 - A hard per-day cap (`pixme.generation.max-per-day`, default 20) as a backstop
   against a scripted client.
 - A 10/hour rate limit on the generation endpoint.

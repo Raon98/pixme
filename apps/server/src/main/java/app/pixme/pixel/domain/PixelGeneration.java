@@ -12,6 +12,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import app.pixme.ai.PixelStyle;
+import app.pixme.store.domain.SpendKind;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -76,11 +77,35 @@ public class PixelGeneration {
     @Column(name = "error_message", length = 512)
     private String errorMessage;
 
+    /**
+     * Authoritative record of what this generation consumed, so the refund path
+     * can return exactly that currency. The two booleans below are the
+     * denormalised form the API already returns to the client.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "spend_kind", nullable = false, length = 24)
+    private SpendKind spendKind = SpendKind.PAID_CREDIT;
+
     @Column(name = "used_free_generation", nullable = false)
     private boolean usedFreeGeneration;
 
     @Column(name = "used_credit", nullable = false)
     private boolean usedCredit;
+
+    /**
+     * Client-supplied idempotency key. A double-tapped button or a network
+     * retry resolves to the same generation instead of a second charge.
+     */
+    @Column(name = "client_request_id", length = 64)
+    private String clientRequestId;
+
+    /** Which Master Character Reference governed this render. */
+    @Column(name = "reference_version", length = 32)
+    private String referenceVersion;
+
+    /** Set when this is a re-render of an earlier generation's analysis. */
+    @Column(name = "retry_of_generation_id")
+    private UUID retryOfGenerationId;
 
     @Column(name = "credit_refunded_at")
     private Instant creditRefundedAt;
@@ -160,7 +185,15 @@ public class PixelGeneration {
         this.creditRefundedAt = Instant.now();
     }
 
+    /** Records what was spent, keeping the denormalised flags consistent. */
+    public void recordSpend(SpendKind kind) {
+        this.spendKind = kind;
+        this.usedFreeGeneration = kind.isFree();
+        this.usedCredit = kind == SpendKind.PAID_CREDIT;
+    }
+
+    /** True when this generation consumed something that has not been returned. */
     public boolean isRefundable() {
-        return usedCredit && creditRefundedAt == null && status.warrantsRefund();
+        return creditRefundedAt == null && status.warrantsRefund();
     }
 }

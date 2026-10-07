@@ -90,12 +90,26 @@ export interface UserStats {
   streakDays: number;
 }
 
+/**
+ * What a generation costs right now.
+ *
+ * <p>Free generation is an onboarding grant, not a daily allowance, so the
+ * three free entitlements are separate: the retry is only reachable from the
+ * first result screen, while the bonus credit can be spent any time.
+ */
 export interface Entitlements {
   plusActive: boolean;
   plusExpiresAt: string | null;
-  freeGenerationAvailable: boolean;
+  /** The very first PIXME is still free. */
+  firstGenerationAvailable: boolean;
+  /** The one free retry of that first result. */
+  firstRetryAvailable: boolean;
+  /** Non-expiring free credits granted at sign-up. */
+  bonusFreeCredits: number;
   /** Paid credits remaining. */
   creditBalance: number;
+  /** Convenience: starting a new PIXME right now costs nothing. */
+  nextGenerationIsFree: boolean;
   unlockedStyles: string[];
   unlockedDecorations: string[];
 }
@@ -165,6 +179,12 @@ export type GenerationStatus =
 
 export type PixelVisibility = 'PUBLIC' | 'PRIVATE';
 
+export type SpendKind =
+  | 'FREE_FIRST'
+  | 'FREE_FIRST_RETRY'
+  | 'FREE_BONUS'
+  | 'PAID_CREDIT';
+
 export interface PixelGeneration {
   id: string;
   status: GenerationStatus;
@@ -174,10 +194,12 @@ export interface PixelGeneration {
   characterImageUrl: string | null;
   /** Present on FAILED / REJECTED_UNSAFE. */
   failureReason: GenerationFailureReason | null;
-  /** True when this generation consumed the daily free slot. */
+  /** Which allowance this consumed; refunded in kind on failure. */
+  spendKind: SpendKind;
   usedFreeGeneration: boolean;
-  /** True when a paid credit was consumed (and refunded on failure). */
   usedCredit: boolean;
+  /** Set when this render is a retry, pointing at the original. */
+  retryOfGenerationId: string | null;
   createdAt: string;
   completedAt: string | null;
 }
@@ -193,6 +215,17 @@ export interface StartGenerationRequest {
   /** Key returned by the upload step. */
   uploadId: string;
   style: PixelStyle;
+  /**
+   * Idempotency key. A double-tapped button or a network retry resolves to
+   * the same generation instead of a second charge.
+   */
+  clientRequestId?: string;
+}
+
+export interface RetryGenerationRequest {
+  generationId: string;
+  style: PixelStyle;
+  clientRequestId?: string;
 }
 
 export interface UploadTicket {
@@ -254,8 +287,11 @@ export interface PublishPixelRequest {
 export interface TodayStatus {
   /** Today's published representative post, if any. */
   myTodayPost: PixelPost | null;
-  freeGenerationAvailable: boolean;
+  firstGenerationAvailable: boolean;
+  firstRetryAvailable: boolean;
+  bonusFreeCredits: number;
   creditBalance: number;
+  nextGenerationIsFree: boolean;
   /** Candidate generations made today that were never published. */
   pendingGenerationId: string | null;
 }
@@ -489,11 +525,12 @@ export interface VerifyPurchaseResponse {
   entitlements: Entitlements;
 }
 
+/** No reset date: free generation is an onboarding grant, not a daily one. */
 export interface CreditSummary {
   creditBalance: number;
-  freeGenerationAvailable: boolean;
-  /** Local date the free slot resets (user timezone, from the server). */
-  freeGenerationResetsAt: string;
+  firstGenerationAvailable: boolean;
+  firstRetryAvailable: boolean;
+  bonusFreeCredits: number;
   history: CreditLedgerEntry[];
 }
 

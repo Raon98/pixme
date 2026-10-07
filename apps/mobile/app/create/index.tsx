@@ -63,7 +63,8 @@ export default function CreateRoute() {
   }, [handleOutcome]);
 
   const alreadyPublished = !!todayStatus.data?.myTodayPost;
-  const freeAvailable = todayStatus.data?.freeGenerationAvailable ?? true;
+  const isFree = todayStatus.data?.nextGenerationIsFree ?? true;
+  const bonusFree = todayStatus.data?.bonusFreeCredits ?? 0;
   const credits = todayStatus.data?.creditBalance ?? 0;
 
   return (
@@ -100,18 +101,20 @@ export default function CreateRoute() {
             {copy.create.hint}
           </Text>
 
-          {!freeAvailable ? (
-            <Text
-              variant="micro"
-              tone={credits > 0 ? 'secondary' : 'danger'}
-              align="center"
-              style={styles.credit}
-            >
-              {credits > 0
-                ? `오늘 무료 생성을 사용했어요. 생성권 ${credits}개가 있어요.`
+          <Text
+            variant="micro"
+            tone={isFree ? 'secondary' : credits > 0 ? 'secondary' : 'danger'}
+            align="center"
+            style={styles.credit}
+          >
+            {isFree
+              ? bonusFree > 0
+                ? copy.generation.bonusRemainingCount(bonusFree)
+                : copy.generation.retryCostFree
+              : credits > 0
+                ? `생성권 ${credits}개가 있어요. 1개가 사용돼요.`
                 : copy.generation.retryNoCredit}
-            </Text>
-          ) : null}
+          </Text>
         </View>
       </Sheet>
 

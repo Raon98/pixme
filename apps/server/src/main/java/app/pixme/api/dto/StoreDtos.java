@@ -46,10 +46,15 @@ public final class StoreDtos {
 
     public record RestoreResponse(EntitlementsResponse entitlements, int restoredCount) {}
 
+    /**
+     * No {@code resetsAt}: free generation is an onboarding grant, not a daily
+     * allowance, so there is nothing to reset.
+     */
     public record CreditSummaryResponse(
             int creditBalance,
-            boolean freeGenerationAvailable,
-            Instant freeGenerationResetsAt,
+            boolean firstGenerationAvailable,
+            boolean firstRetryAvailable,
+            int bonusFreeCredits,
             List<CreditLedgerResponse> history) {}
 
     public record CreditLedgerResponse(

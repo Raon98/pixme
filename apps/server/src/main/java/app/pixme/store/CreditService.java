@@ -1,16 +1,15 @@
 package app.pixme.store;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
 import app.pixme.common.ApiException;
 import app.pixme.common.ErrorCode;
-import app.pixme.common.ServiceClock;
 import app.pixme.config.PixmeProperties;
 import app.pixme.store.domain.CreditLedgerEntry;
 import app.pixme.store.domain.CreditReason;
 import app.pixme.store.domain.GenerationCredit;
+import app.pixme.store.domain.SpendKind;
 import app.pixme.store.repository.CreditLedgerRepository;
 import app.pixme.store.repository.GenerationCreditRepository;
 import org.slf4j.Logger;
@@ -21,16 +20,25 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The generation allowance.
+ * The generation allowance — the money path.
  *
- * <p>This is the money path, so a few rules are enforced here and nowhere else:
+ * <p>Free generation is an onboarding grant, not a daily allowance:
+ *
+ * <pre>
+ *   1st generation            free   (once per account)
+ *   retry of that 1st result  free   (once, only inside the first flow)
+ *   bonus free credit         free   (one, usable any time afterwards)
+ *   everything after that     paid
+ * </pre>
+ *
+ * <p>Rules enforced here and nowhere else:
  * <ul>
- *   <li>The free daily slot is spent before any paid credit. A user who has
- *       bought credits still gets their free generation every day.
+ *   <li>Free chances are spent before paid credits, in the order above.
  *   <li>Spending takes a row lock, so two concurrent requests can't both spend
  *       the last credit.
- *   <li>Every movement writes a ledger row, and a refund is keyed to the
- *       generation that failed so it can only ever happen once.
+ *   <li>A refund gives back <em>exactly</em> the currency that was spent — which
+ *       is why {@link SpendKind} is recorded on the generation rather than a
+ *       bare "was it free?" boolean.
  * </ul>
  */
 @Service
@@ -40,74 +48,99 @@ public class CreditService {
 
     private final GenerationCreditRepository creditRepository;
     private final CreditLedgerRepository ledgerRepository;
-    private final ServiceClock clock;
     private final PixmeProperties properties;
 
     public CreditService(
             GenerationCreditRepository creditRepository,
             CreditLedgerRepository ledgerRepository,
-            ServiceClock clock,
             PixmeProperties properties) {
         this.creditRepository = creditRepository;
         this.ledgerRepository = ledgerRepository;
-        this.clock = clock;
         this.properties = properties;
     }
 
-    /** What was actually spent for a generation. Drives the refund decision. */
-    public enum SpendKind {
-        FREE_DAILY,
-        PAID_CREDIT
-    }
+    /**
+     * What the user can do right now.
+     *
+     * @param firstGenerationAvailable the very first PIXME is still free
+     * @param firstRetryAvailable the one free retry of the first result
+     * @param bonusFreeCredits non-expiring free credits from sign-up
+     * @param creditBalance purchased credits
+     */
+    public record Allowance(
+            boolean firstGenerationAvailable,
+            boolean firstRetryAvailable,
+            int bonusFreeCredits,
+            int creditBalance) {
 
-    public record Allowance(boolean freeAvailable, int creditBalance) {
-
+        /** Can a *new* generation be started (retry excluded — it is scoped). */
         public boolean canGenerate() {
-            return freeAvailable || creditBalance > 0;
+            return firstGenerationAvailable || bonusFreeCredits > 0 || creditBalance > 0;
+        }
+
+        /** True when the next new generation costs nothing. */
+        public boolean nextGenerationIsFree() {
+            return firstGenerationAvailable || bonusFreeCredits > 0;
+        }
+
+        public int freeRemaining() {
+            return (firstGenerationAvailable ? 1 : 0)
+                    + (firstRetryAvailable ? 1 : 0)
+                    + bonusFreeCredits;
         }
     }
 
     @Transactional(readOnly = true)
     public Allowance allowance(UUID userId) {
-        GenerationCredit credit = creditRepository.findById(userId).orElse(null);
-        if (credit == null) {
-            return new Allowance(true, 0);
-        }
+        return creditRepository
+                .findById(userId)
+                .map(this::toAllowance)
+                .orElseGet(() -> new Allowance(
+                        true, false, properties.generation().onboardingBonusCredits(), 0));
+    }
+
+    private Allowance toAllowance(GenerationCredit credit) {
         return new Allowance(
-                credit.hasFreeGeneration(clock.today(), properties.generation().freePerDay()),
+                credit.isFirstGenerationAvailable(),
+                credit.isFirstRetryAvailable(),
+                credit.getBonusFreeCreditCount(),
                 credit.getCreditCount());
     }
 
-    /** Ensures the row exists. Called once at sign-up. */
+    /** Creates the row with the onboarding grant. Called once, at sign-up. */
     @Transactional
     public GenerationCredit initialize(UUID userId) {
         return creditRepository
                 .findById(userId)
-                .orElseGet(() -> creditRepository.save(GenerationCredit.createFor(userId)));
+                .orElseGet(() -> creditRepository.save(GenerationCredit.createFor(
+                        userId, properties.generation().onboardingBonusCredits())));
     }
 
+    /* ------------------------------------------------------------- spend */
+
     /**
-     * Spends the free slot if available, otherwise one paid credit.
+     * Spends the cheapest available allowance for a brand-new generation:
+     * first-generation, then bonus free, then a paid credit.
      *
-     * @throws ApiException {@code NO_GENERATION_AVAILABLE} when neither exists
+     * @throws ApiException {@code NO_GENERATION_AVAILABLE} when none remain
      */
     @Transactional
     public SpendKind spendForGeneration(UUID userId, UUID generationId) {
-        GenerationCredit credit = creditRepository
-                .findForUpdate(userId)
-                .orElseGet(() -> creditRepository.saveAndFlush(GenerationCredit.createFor(userId)));
+        GenerationCredit credit = lockOrCreate(userId);
 
-        LocalDate today = clock.today();
-
-        if (credit.hasFreeGeneration(today, properties.generation().freePerDay())) {
-            credit.consumeFreeGeneration(today);
+        if (credit.isFirstGenerationAvailable()) {
+            credit.consumeFirstGeneration();
             creditRepository.save(credit);
-            // The free slot is not a credit, so it produces no ledger entry —
-            // the ledger tracks paid balance only.
-            return SpendKind.FREE_DAILY;
+            return SpendKind.FREE_FIRST;
         }
 
-        if (credit.getCreditCount() <= 0) {
+        if (credit.hasBonusFreeCredit()) {
+            credit.consumeBonusFreeCredit();
+            creditRepository.save(credit);
+            return SpendKind.FREE_BONUS;
+        }
+
+        if (!credit.hasPaidCredit()) {
             throw new ApiException(ErrorCode.NO_GENERATION_AVAILABLE);
         }
 
@@ -120,54 +153,71 @@ public class CreditService {
     }
 
     /**
-     * Returns the credit spent on a failed generation.
+     * Spends the first-character free retry if it is still available,
+     * otherwise falls through to the normal order.
      *
-     * <p>Runs in its own transaction so that a refund still lands even when the
-     * surrounding generation transaction is rolling back — the whole point is
-     * that a server-side failure never costs the user money.
+     * <p>Kept separate from {@link #spendForGeneration} because the free retry
+     * is scoped to one moment in the product — the first result screen — and
+     * must not be reachable from the ordinary "make another PIXME" path.
+     */
+    @Transactional
+    public SpendKind spendForFirstRetry(UUID userId, UUID generationId) {
+        GenerationCredit credit = lockOrCreate(userId);
+
+        if (credit.isFirstRetryAvailable()) {
+            credit.consumeFirstRetry();
+            creditRepository.save(credit);
+            return SpendKind.FREE_FIRST_RETRY;
+        }
+        return spendForGeneration(userId, generationId);
+    }
+
+    /* ------------------------------------------------------------ refund */
+
+    /**
+     * Returns exactly what a failed generation consumed.
      *
-     * @return true when a credit was actually returned
+     * <p>Runs in its own transaction so the refund still lands when the
+     * surrounding generation transaction is rolling back — a server-side
+     * failure must never cost the user anything.
+     *
+     * @return true when something was actually returned
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public boolean refundForGeneration(UUID userId, UUID generationId) {
-        if (ledgerRepository.existsByReferenceIdAndReason(
-                generationId, CreditReason.GENERATION_REFUND)) {
+    public boolean refund(UUID userId, UUID generationId, SpendKind spendKind) {
+        if (spendKind == SpendKind.PAID_CREDIT
+                && ledgerRepository.existsByReferenceIdAndReason(
+                        generationId, CreditReason.GENERATION_REFUND)) {
             return false;
         }
 
-        GenerationCredit credit = creditRepository
-                .findForUpdate(userId)
-                .orElseGet(() -> creditRepository.saveAndFlush(GenerationCredit.createFor(userId)));
+        GenerationCredit credit = lockOrCreate(userId);
 
-        credit.addCredits(1);
+        switch (spendKind) {
+            case FREE_FIRST -> credit.restoreFirstGeneration();
+            case FREE_FIRST_RETRY -> credit.restoreFirstRetry();
+            case FREE_BONUS -> credit.restoreBonusFreeCredit();
+            case PAID_CREDIT -> {
+                credit.addCredits(1);
+                ledgerRepository.save(CreditLedgerEntry.of(
+                        userId,
+                        1,
+                        CreditReason.GENERATION_REFUND,
+                        credit.getCreditCount(),
+                        generationId));
+            }
+        }
+
         creditRepository.save(credit);
-        ledgerRepository.save(CreditLedgerEntry.of(
+        log.info(
+                "refunded {} to user={} for failed generation={}",
+                spendKind,
                 userId,
-                1,
-                CreditReason.GENERATION_REFUND,
-                credit.getCreditCount(),
-                generationId));
-
-        log.info("refunded 1 credit to user={} for failed generation={}", userId, generationId);
+                generationId);
         return true;
     }
 
-    /**
-     * Returns the free daily slot for a failed generation.
-     *
-     * <p>Symmetrical with the credit refund: a free generation that failed on
-     * our side must not consume the user's one chance for the day.
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void restoreFreeGeneration(UUID userId) {
-        creditRepository.findForUpdate(userId).ifPresent(credit -> {
-            if (credit.getFreeUsedToday() > 0
-                    && clock.today().equals(credit.getLastFreeGenerationDate())) {
-                credit.setFreeUsedToday((short) (credit.getFreeUsedToday() - 1));
-                creditRepository.save(credit);
-            }
-        });
-    }
+    /* ------------------------------------------------------------- grant */
 
     @Transactional
     public int grant(UUID userId, int amount, CreditReason reason, UUID referenceId) {
@@ -175,10 +225,7 @@ public class CreditService {
             return allowance(userId).creditBalance();
         }
 
-        GenerationCredit credit = creditRepository
-                .findForUpdate(userId)
-                .orElseGet(() -> creditRepository.saveAndFlush(GenerationCredit.createFor(userId)));
-
+        GenerationCredit credit = lockOrCreate(userId);
         credit.addCredits(amount);
         creditRepository.save(credit);
         ledgerRepository.save(CreditLedgerEntry.of(
@@ -189,13 +236,13 @@ public class CreditService {
 
     @Transactional(readOnly = true)
     public List<CreditLedgerEntry> history(UUID userId, int limit) {
-        return ledgerRepository.findByUserIdOrderByCreatedAtDesc(
-                userId, PageRequest.of(0, limit));
+        return ledgerRepository.findByUserIdOrderByCreatedAtDesc(userId, PageRequest.of(0, limit));
     }
 
-    /** How many generations the user has made today, for the hard daily cap. */
-    @Transactional(readOnly = true)
-    public boolean freeAvailable(UUID userId) {
-        return allowance(userId).freeAvailable();
+    private GenerationCredit lockOrCreate(UUID userId) {
+        return creditRepository
+                .findForUpdate(userId)
+                .orElseGet(() -> creditRepository.saveAndFlush(GenerationCredit.createFor(
+                        userId, properties.generation().onboardingBonusCredits())));
     }
 }

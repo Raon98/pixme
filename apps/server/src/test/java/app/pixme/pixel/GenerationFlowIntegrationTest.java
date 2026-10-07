@@ -65,6 +65,9 @@ class GenerationFlowIntegrationTest {
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
+    @Autowired
+    private app.pixme.ai.MasterCharacterReference masterReference;
+
     /**
      * Clears today's published content before each run.
      *
@@ -102,15 +105,17 @@ class GenerationFlowIntegrationTest {
         storage.putOriginal(captureObjectKey(author, uploadId), fakeJpeg());
 
         // --- 2. generation ---------------------------------------------------
-        assertThat(creditService.allowance(author.getId()).freeAvailable()).isTrue();
+        assertThat(creditService.allowance(author.getId()).firstGenerationAvailable()).isTrue();
 
         PixelGeneration started = generationService.start(
-                author.getId(), uploadId, PixelStyle.PIXME_BASIC);
+                author.getId(), uploadId, PixelStyle.PIXME_BASIC, "req-" + UUID.randomUUID());
 
+        assertThat(started.getSpendKind())
+                .isEqualTo(app.pixme.store.domain.SpendKind.FREE_FIRST);
         assertThat(started.isUsedFreeGeneration()).isTrue();
         assertThat(started.isUsedCredit()).isFalse();
-        // The free slot is spent up front, so a parallel request can't also use it.
-        assertThat(creditService.allowance(author.getId()).freeAvailable()).isFalse();
+        // Charged up front, so a parallel request can't also claim it.
+        assertThat(creditService.allowance(author.getId()).firstGenerationAvailable()).isFalse();
 
         await().atMost(Duration.ofSeconds(20))
                 .pollInterval(Duration.ofMillis(200))
@@ -175,10 +180,10 @@ class GenerationFlowIntegrationTest {
         ((InMemoryStorageService) storageService)
                 .putOriginal(captureObjectKey(author, uploadId), fakeJpeg());
 
-        generationService.start(author.getId(), uploadId, PixelStyle.PIXME_BASIC);
+        generationService.start(author.getId(), uploadId, PixelStyle.PIXME_BASIC, null);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> generationService.start(
-                        author.getId(), uploadId, PixelStyle.PIXME_BASIC))
+                        author.getId(), uploadId, PixelStyle.PIXME_BASIC, null))
                 .isInstanceOf(app.pixme.common.ApiException.class)
                 .extracting(error -> ((app.pixme.common.ApiException) error).code())
                 .isEqualTo(app.pixme.common.ErrorCode.UPLOAD_ALREADY_USED);
@@ -194,7 +199,7 @@ class GenerationFlowIntegrationTest {
                 .uploadId();
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> generationService.start(
-                        author.getId(), uploadId, PixelStyle.Y2K_PIXEL))
+                        author.getId(), uploadId, PixelStyle.Y2K_PIXEL, null))
                 .isInstanceOf(app.pixme.common.ApiException.class)
                 .extracting(error -> ((app.pixme.common.ApiException) error).code())
                 .isEqualTo(app.pixme.common.ErrorCode.STYLE_NOT_UNLOCKED);
@@ -208,6 +213,100 @@ class GenerationFlowIntegrationTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                         generationService.createUpload(author.getId(), "image/gif", 100))
                 .isInstanceOf(app.pixme.common.ApiException.class);
+    }
+
+    @Test
+    @DisplayName("같은 clientRequestId로 두 번 눌러도 생성은 하나다")
+    void generateIsIdempotentOnClientRequestId() {
+        User author = fixtures.activeUser("idemp");
+
+        UUID uploadId = generationService
+                .createUpload(author.getId(), "image/jpeg", 100)
+                .uploadId();
+        ((InMemoryStorageService) storageService)
+                .putOriginal(captureObjectKey(author, uploadId), fakeJpeg());
+
+        String requestId = "req-" + UUID.randomUUID();
+        PixelGeneration first = generationService.start(
+                author.getId(), uploadId, PixelStyle.PIXME_BASIC, requestId);
+        PixelGeneration replay = generationService.start(
+                author.getId(), uploadId, PixelStyle.PIXME_BASIC, requestId);
+
+        assertThat(replay.getId()).isEqualTo(first.getId());
+        // And crucially, the replay did not spend a second allowance.
+        assertThat(creditService.allowance(author.getId()).bonusFreeCredits()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("첫 캐릭터 재생성은 무료이고, 두 후보를 비교할 수 있다")
+    void firstRetryIsFreeAndOffersBothCandidates() {
+        User author = fixtures.activeUser("cmp");
+
+        UUID uploadId = generationService
+                .createUpload(author.getId(), "image/jpeg", 100)
+                .uploadId();
+        ((InMemoryStorageService) storageService)
+                .putOriginal(captureObjectKey(author, uploadId), fakeJpeg());
+
+        PixelGeneration first = generationService.start(
+                author.getId(), uploadId, PixelStyle.PIXME_BASIC, null);
+        awaitTerminal(author, first.getId());
+
+        PixelGeneration retry = generationService.retry(
+                author.getId(), first.getId(), PixelStyle.PIXME_BASIC, null);
+
+        assertThat(retry.getSpendKind())
+                .isEqualTo(app.pixme.store.domain.SpendKind.FREE_FIRST_RETRY);
+        assertThat(retry.getRetryOfGenerationId()).isEqualTo(first.getId());
+        // The retry reuses the stored analysis — same outfit, new render.
+        // (Re-read the original: the analysis is written by the pipeline, so
+        // the entity returned by `start` predates it.)
+        PixelGeneration firstCompleted = generationService.get(author.getId(), first.getId());
+        assertThat(retry.getAnalysisJson()).isEqualTo(firstCompleted.getAnalysisJson());
+        assertThat(retry.getAnalysisJson()).isNotBlank();
+
+        awaitTerminal(author, retry.getId());
+
+        var candidates = generationService.candidatesFor(author.getId(), retry.getId());
+        assertThat(candidates).extracting(PixelGeneration::getId)
+                .containsExactly(first.getId(), retry.getId());
+
+        // The bonus credit is untouched: the retry is its own currency.
+        assertThat(creditService.allowance(author.getId()).bonusFreeCredits()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("생성된 캐릭터는 마스터 레퍼런스 규격으로 정규화된다")
+    void generatedCharacterIsNormalisedToTheReferenceSpec() throws Exception {
+        User author = fixtures.activeUser("norm");
+
+        UUID uploadId = generationService
+                .createUpload(author.getId(), "image/jpeg", 100)
+                .uploadId();
+        InMemoryStorageService storage = (InMemoryStorageService) storageService;
+        storage.putOriginal(captureObjectKey(author, uploadId), fakeJpeg());
+
+        PixelGeneration generation = generationService.start(
+                author.getId(), uploadId, PixelStyle.PIXME_BASIC, null);
+        awaitTerminal(author, generation.getId());
+
+        byte[] stored = storage.character(
+                generationService.get(author.getId(), generation.getId())
+                        .getGeneratedObjectKey());
+        var image = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(stored));
+
+        var spec = masterReference.spec();
+        assertThat(image.getWidth()).isEqualTo(spec.canvasSize());
+        assertThat(image.getHeight()).isEqualTo(spec.canvasSize());
+    }
+
+    private void awaitTerminal(User author, UUID generationId) {
+        await().atMost(Duration.ofSeconds(20))
+                .pollInterval(Duration.ofMillis(200))
+                .until(() -> generationService
+                        .get(author.getId(), generationId)
+                        .getStatus()
+                        .isTerminal());
     }
 
     /* -------------------------------------------------------------- helpers */

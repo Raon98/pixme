@@ -9,67 +9,86 @@ import org.springframework.stereotype.Component;
 /**
  * Versioned prompt construction.
  *
- * <p>Prompts are the product here, not an implementation detail, so they are
- * versioned ({@code PIXME_V1}) and every generation stores the version that
- * produced it. That is what makes it possible to change the art direction and
- * then compare before/after on real inputs instead of guessing.
+ * <p>Prompts are the product here, so they are versioned and every generation
+ * records the version that produced it. That is what makes changing the art
+ * direction measurable — re-run stored analyses under a new version and
+ * compare — instead of a matter of opinion.
  *
- * <p>Two hard rules encoded below, both of which the whole concept depends on:
+ * <p>{@code PIXME_CHARACTER_V1} is built around two references:
+ *
+ * <ul>
+ *   <li><b>Image A</b>, the user's photo → who the person is and what they
+ *       wore. Hair, eye and brow shape, lips, skin tone, every visible garment
+ *       with its colour, pattern and layering, bag, glasses, hat, shoes.
+ *   <li><b>Image B</b>, the Master Character Reference → how a PIXME is built.
+ *       Proportions, head-to-body ratio, scale, pixel density, how far features
+ *       are simplified, silhouette, pose, rendering language.
+ * </ul>
+ *
+ * <p>Three rules the prompt is written to enforce, in priority order:
  * <ol>
- *   <li><b>Preserve, don't reinterpret.</b> The character must wear what the
- *       person wore. Hair, layers, colours, patterns and accessories are
- *       described explicitly from the analysis instead of left to the model's
- *       taste.
- *   <li><b>Never invent what isn't visible.</b> If the photo stops at the
- *       waist, the prompt says so and forbids inventing legs, trousers or
- *       shoes. A selfie yields a bust-framed character, not a fabricated
- *       full-body outfit.
+ *   <li>The outfit must stay recognisably the one in the photo — never
+ *       substituted with a generic equivalent.
+ *   <li>The face must read as that person — eye shape, brows, lips — rendered
+ *       at the reference's level of simplification.
+ *   <li>Nothing the photo does not show may be invented.
  * </ol>
  */
 @Component
 public class PromptLibrary {
 
-    public static final String VERSION_V1 = "PIXME_V1";
+    /** Current version. Bump to V2 to change the art direction. */
+    public static final String VERSION = "PIXME_CHARACTER_V1";
+
+    /** Retained so older generations can be re-rendered for comparison. */
+    public static final String VERSION_LEGACY = "PIXME_V1";
 
     /* ------------------------------------------------------------ analysis */
 
     /**
-     * System prompt for the vision pass. Deliberately asks for garments and
-     * framing only — no age, ethnicity, body-shape or attractiveness
-     * judgements, which the product has no use for and should not collect.
+     * System prompt for the vision pass.
+     *
+     * <p>It asks for facial <em>shape</em> — what a portrait artist needs to
+     * make the character recognisable — while still refusing age, ethnicity and
+     * attractiveness, none of which the product has any use for.
      */
     public String analysisSystemPrompt() {
         return """
-               You are a wardrobe and hairstyle annotator for a pixel-avatar app.
+               You are a character-design annotator for a pixel-avatar app. You look at
+               one photo and describe the person's face, hair and outfit precisely
+               enough that an artist could redraw them as a small pixel character and
+               the person would recognise themselves.
 
-               Look at the photo and report ONLY what is clearly visible. Your output
-               is used to redraw the person as a small pixel character wearing the
-               same outfit, so accuracy about clothing matters more than detail about
-               the person.
+               Report ONLY what is clearly visible.
 
                Rules:
-               1. Set "framing" to FULL_BODY only if legs and feet are visible,
-                  UPPER_BODY if the frame stops between the waist and the chest,
-                  SELFIE if it is a close head-and-shoulders shot.
-               2. Only include a garment if you can see it. If the frame stops at the
-                  waist, do NOT include a BOTTOM garment. If feet are not visible, set
-                  "footwear" to null. Never guess.
-               3. For layered clothing, emit one garment per visible piece and use
-                  "layer" (0 = innermost) so an open jacket over a tee is two entries.
-               4. Describe colours as plain words plus an approximate hex in
-                  "paletteHints".
-               5. Do NOT describe the person's age, ethnicity, body shape,
-                  attractiveness, or any identifying feature beyond hairstyle,
-                  glasses, facial hair and expression.
-               6. If there is no clear single person, set "personDetected" to false
-                  and leave everything else empty.
+               1. "framing": FULL_BODY only if legs and feet are visible, UPPER_BODY if
+                  the frame stops between the waist and the chest, SELFIE for a close
+                  head-and-shoulders shot.
+               2. Face: describe the SHAPE of the features — face outline, eye shape and
+                  size, brow shape, lip shape, skin tone — so the character resembles
+                  this specific person. If no face is visible, set "faceVisible" to
+                  false and leave the face fields null. Never invent a face.
+               3. Clothing: one entry per visible garment. Use "layer" (0 = innermost)
+                  so an open jacket over a tee is two entries. Record colour and pattern
+                  exactly — "grey with black wavy horizontal stripes" is useful,
+                  "patterned top" is not.
+               4. If the frame stops at the waist, emit NO BOTTOM garment. If feet are
+                  not visible, set "footwear" to null. Never guess.
+               5. Colours as plain words, plus approximate hex values in "paletteHints".
+               6. Do NOT state the person's age, ethnicity, nationality, body weight or
+                  attractiveness. Describe shapes, colours and garments only.
+               7. If there is no clear single person, set "personDetected" to false.
 
                Respond with JSON only, matching this shape exactly:
                {
                  "framing": "SELFIE|UPPER_BODY|FULL_BODY|UNKNOWN",
                  "personDetected": true,
                  "hair": {"length": "", "texture": "", "color": "", "fringe": ""},
-                 "face": {"expression": "", "glasses": false, "glassesStyle": null,
+                 "face": {"faceVisible": true, "expression": "", "faceShape": "",
+                          "eyeShape": "", "eyeSize": "", "eyeColor": "",
+                          "browShape": "", "lipShape": "", "skinTone": "",
+                          "glasses": false, "glassesStyle": null,
                           "facialHair": false, "facialHairStyle": null},
                  "garments": [{"slot": "TOP|OUTER|BOTTOM|DRESS|HEADWEAR",
                                "type": "", "color": "", "pattern": "",
@@ -90,85 +109,148 @@ public class PromptLibrary {
     /* ---------------------------------------------------------- generation */
 
     /**
-     * The house style. Shared by every style variant so that a crowd in the
-     * square reads as one world — which is the single most important visual
-     * property of the product.
+     * The two-reference instruction, stated before anything else so it frames
+     * everything that follows. Wording follows the product brief closely.
      */
-    private static final String BASE_ART_DIRECTION =
-            """
-            Draw an ORIGINAL pixel-art character sprite, redrawn from scratch.
+    private String referenceContract(boolean hasMasterReference) {
+        if (!hasMasterReference) {
+            // Degraded path: no Image B available. Say so explicitly rather
+            // than silently producing a different character family.
+            return """
+                   Draw an ORIGINAL full-body pixel character from the user photo,
+                   following the PIXME construction described below exactly.
+                   """;
+        }
+        return """
+               You are given two images.
 
-            Construction (identical for every PIXME character):
-            - Single character, front-facing, standing, calm neutral pose, arms down.
-            - Slightly oversized head, compact body. Roughly 1 : 2.6 head-to-body.
-            - Clean, deliberate pixel edges. Every pixel placed on one consistent grid.
-            - Limited palette: at most 4 shades per garment, flat fills with one
-              simple shadow tone. No gradients, no dithering noise, no soft blur.
-            - Cute but not childish. Modern, slightly Y2K sensibility.
-            - Readable silhouette at small size; the character appears 72px tall in a
-              crowd and 300px tall on its own card.
-            - Fully transparent background. No ground shadow, no frame, no backdrop,
-              no text, no watermark, no logo, no UI.
-            - Centred in a square canvas with even margins.
+               Image A is the user's photo.
+               Image B is the PIXME Master Character Reference.
 
-            Never produce:
-            - photorealism, 3D render, or any lighting simulation
-            - anime or manga illustration, smooth vector art, painted art
-            - exaggerated chibi proportions (huge head, tiny stub body)
-            - any recognisable existing game, film or brand character
-            - multiple characters, props the person is not holding, or a scene
-            """;
+               Use Image A as the identity and outfit reference, and use Image B as the
+               strict visual standard.
+
+               From Image A, preserve the person's visible hairstyle, hair colour, eye
+               shape, brow shape, lip shape, facial impression, skin tone, clothing,
+               clothing colours, patterns, layers, bags, glasses, hats, accessories and
+               shoes.
+
+               From Image B, strictly preserve the body proportions, head-to-body ratio,
+               character scale, pixel density, the degree to which facial features are
+               simplified, the silhouette, the standing pose and the overall visual
+               language.
+
+               The result must look like the exact same PIXME avatar system with only
+               the person and the outfit changed. Style consistency is more important
+               than creative variation. Do not create a new character style.
+               """;
+    }
+
+    /**
+     * The fixed construction, stated numerically from the measured reference so
+     * it survives a vague model reading of Image B.
+     */
+    private String construction(CharacterSpec spec, boolean hasMasterReference) {
+        return """
+               PIXME construction — identical for every character, never varied:
+               - One single character, full body, front-facing (or very slightly
+                 turned), relaxed standing pose, arms down at the sides, hands may rest
+                 in pockets.
+               - Slightly oversized head: head including hair is about %.0f%% of the
+                 total height, roughly %.1f heads tall. Cute, not chibi, not realistic.
+               - The character fills about %.0f%% of the canvas height, is centred
+                 horizontally, with the soles sitting on the lower baseline and a small
+                 margin of empty space above the hair.
+               - Clean, deliberate pixel edges on one consistent grid. No anti-aliasing,
+                 no blur, no soft gradients.
+               - Limited palette per garment with simple shading for folds and volume,
+                 plus a darker outline on the silhouette. Shading is restrained: it
+                 describes form, it does not become painting.
+               - Large, expressive pixel eyes with a single bright highlight; soft brows;
+                 a small simple mouth; subtle cheek blush. The nose is minimal or
+                 omitted. This is the simplification LEVEL — the SHAPE of each feature
+                 must follow the person in Image A.
+               - Readable at small size: the character appears about 72px tall in a
+                 crowd and about 300px tall on its own card.
+
+               Output:
+               - One centered full-body pixel character on a FULLY TRANSPARENT
+                 background.
+               - No ground shadow, no backdrop, no frame, no text, no watermark, no UI.%s
+
+               Never produce:
+               - photorealism, 3D render, or lighting simulation
+               - anime or manga illustration, smooth vector art, painted illustration
+               - exaggerated chibi proportions (huge head, tiny stub body)
+               - any recognisable existing game, film or brand character
+               - multiple characters, a scene, or props the person is not carrying
+               """
+                .formatted(
+                        spec.headRatio() * 100,
+                        spec.headsTall(),
+                        spec.characterHeightRatio() * 100,
+                        // Only meaningful when the reference is actually sent:
+                        // it is exported on a flat background with a ground
+                        // shadow, neither of which is part of the standard.
+                        hasMasterReference
+                                ? "\n                 (Image B is exported on a flat background with a shadow"
+                                        + " — that is not\n                 part of the standard. Do not reproduce it.)"
+                                : "");
+    }
 
     private String styleModifier(PixelStyle style) {
         return switch (style) {
             case PIXME_BASIC ->
-                    "Style: the PIXME house style. Medium pixel scale, soft but saturated "
-                            + "palette, 1px darker outline, warm neutral skin shading.";
+                    "Style: the PIXME house style exactly as shown in the Master Character "
+                            + "Reference. Do not deviate.";
             case Y2K_PIXEL ->
-                    "Style: Y2K pixel. Higher saturation, slightly glossy highlights, "
-                            + "bolder 1px outline, cool metallic accents.";
+                    "Style variation: Y2K. Higher saturation, slightly glossy highlights, "
+                            + "cool metallic accents. Construction and proportions unchanged.";
             case BIT_16 ->
-                    "Style: 16-bit era. Finer pixel grid, one extra shading step per "
-                            + "garment, richer mid-tones, still flat fills.";
+                    "Style variation: 16-bit. One extra shading step per garment, richer "
+                            + "mid-tones. Construction and proportions unchanged.";
             case RETRO_PC ->
-                    "Style: early PC display. Restricted 16-colour palette, visible "
-                            + "coarse pixels, slight colour banding, no anti-aliasing.";
+                    "Style variation: early PC display. Restricted 16-colour palette, "
+                            + "visible colour banding. Construction and proportions unchanged.";
             case ARCADE ->
-                    "Style: arcade cabinet. High contrast, strong black outline, "
-                            + "punchy primary colours on a dark-friendly palette.";
+                    "Style variation: arcade. High contrast, strong outline, punchy "
+                            + "primaries. Construction and proportions unchanged.";
             case MINI_PIXEL ->
-                    "Style: mini pixel. Smaller overall sprite, rounder shapes, "
-                            + "simplified features, fewer pixels per limb.";
+                    "Style variation: mini pixel. Coarser grid, rounder shapes, fewer "
+                            + "pixels per limb. Construction and proportions unchanged.";
             case SOFT_PIXEL ->
-                    "Style: soft pixel. Pastel palette, low contrast, gentle shading, "
-                            + "no hard black outline.";
+                    "Style variation: soft pixel. Pastel palette, low contrast, no hard "
+                            + "black outline. Construction and proportions unchanged.";
         };
     }
 
     /**
-     * Builds the generation prompt from the analysis.
+     * Builds the generation prompt from the analysis and the measured spec.
      *
-     * <p>The garment description is assembled in layer order and the framing
-     * clause is explicit about what must <em>not</em> be drawn — that negative
-     * instruction is what stops the model from confidently inventing jeans and
-     * sneakers for a selfie.
+     * <p>The outfit is assembled in layer order, the face is described
+     * shape-by-shape, and the framing clause states explicitly what must
+     * <em>not</em> be drawn — that negative instruction is what stops the model
+     * confidently inventing jeans and sneakers for a selfie.
      */
-    public String characterPrompt(ImageAnalysis analysis, PixelStyle style) {
+    public String characterPrompt(
+            ImageAnalysis analysis, PixelStyle style, CharacterSpec spec, boolean hasMasterReference) {
+
         List<String> sections = new ArrayList<>();
-        sections.add(BASE_ART_DIRECTION.strip());
+        sections.add(referenceContract(hasMasterReference).strip());
+        sections.add(construction(spec, hasMasterReference).strip());
         sections.add(styleModifier(style));
-        sections.add("Reproduce this exact appearance:");
+        sections.add("Reproduce this exact person and outfit:");
 
         if (analysis.hair() != null) {
             sections.add("- Hair: " + describeHair(analysis.hair()));
         }
         if (analysis.face() != null) {
-            sections.add("- Face: " + describeFace(analysis.face()));
+            sections.add(describeFace(analysis.face()));
         }
 
         List<String> tops = describeGarments(analysis, "OUTER", "TOP", "DRESS");
         if (!tops.isEmpty()) {
-            sections.add("- Worn on top, outermost last: " + String.join("; ", tops));
+            sections.add("- Worn on top, innermost first: " + String.join("; ", tops));
         }
 
         List<String> bottoms = describeGarments(analysis, "BOTTOM");
@@ -196,7 +278,8 @@ public class PromptLibrary {
                 }
                 accessories.add(text.toString());
             }
-            sections.add("- Accessories: " + String.join("; ", accessories));
+            sections.add("- Accessories, all of which must be visible: "
+                    + String.join("; ", accessories));
         }
 
         if (analysis.showsFootwear()) {
@@ -206,12 +289,11 @@ public class PromptLibrary {
         }
 
         if (analysis.paletteHints() != null && !analysis.paletteHints().isEmpty()) {
-            sections.add("- Keep these outfit colours: "
-                    + String.join(", ", analysis.paletteHints()));
+            sections.add("- Keep these colours: " + String.join(", ", analysis.paletteHints()));
         }
 
         if (analysis.mood() != null && !analysis.mood().isBlank()) {
-            sections.add("- Overall feeling to convey: " + analysis.mood());
+            sections.add("- Overall feeling: " + analysis.mood());
         }
 
         sections.add(framingClause(analysis));
@@ -221,37 +303,52 @@ public class PromptLibrary {
         }
 
         sections.add(
-                "Priority order if anything conflicts: garment identity and colour first, "
-                        + "then hair, then accessories, then mood. Do not improve, restyle or "
-                        + "accessorise the outfit — it must stay the clothes this person "
-                        + "actually wore today.");
+                """
+                Do not replace any garment with a generic equivalent. If the photo shows
+                a grey collared top with black wavy stripes, a black backpack and black
+                wide-leg trousers, all four must still be recognisable in the result,
+                simplified into pixels but not substituted.
 
-        return String.join("\n", sections);
+                Priority if anything conflicts: PIXME construction and proportions
+                first, then garment identity and colour, then facial likeness, then
+                hair, then accessories, then mood. Do not improve, restyle or
+                accessorise the outfit — it must stay the clothes this person actually
+                wore today.
+                """
+                        .strip());
+
+        return String.join("\n\n", sections);
     }
 
-    /**
-     * The anti-invention clause. Framing is the one place where being
-     * permissive produces a wrong result the user will immediately notice
-     * ("I wasn't wearing that"), so each case is spelled out.
-     */
+    /** The anti-invention clause. */
     private String framingClause(ImageAnalysis analysis) {
-        return switch (analysis.framing() == null ? ImageAnalysis.Framing.UNKNOWN : analysis.framing()) {
+        String base = switch (analysis.framing() == null
+                ? ImageAnalysis.Framing.UNKNOWN
+                : analysis.framing()) {
             case FULL_BODY ->
-                    "Framing: draw the full body from head to feet, standing, the whole "
-                            + "outfit visible.";
+                    "Framing: the photo shows the full body. Draw the character head to "
+                            + "feet with the whole outfit visible.";
             case UPPER_BODY ->
-                    "Framing: the source photo only shows the upper body. Draw the "
-                            + "character from the head to just below the hips and fade the "
-                            + "sprite out there. Do NOT invent trousers, skirts, legs or "
-                            + "shoes that were not visible.";
+                    "Framing: the photo only shows the upper body. Still draw a full-body "
+                            + "character in the standard PIXME pose, but give the lower half "
+                            + "plain, neutral clothing in a colour drawn from the visible "
+                            + "palette. Do NOT invent a specific garment, pattern or "
+                            + "footwear that was not visible, and do not draw attention to "
+                            + "the lower half.";
             case SELFIE ->
-                    "Framing: the source photo is a close selfie. Draw a bust — head, "
-                            + "shoulders and the visible part of the top only. Do NOT invent "
-                            + "a lower body, legs, bottoms or shoes.";
+                    "Framing: the photo is a close selfie. Still draw a full-body character "
+                            + "in the standard PIXME pose, but keep everything below the "
+                            + "visible top plain and neutral. Do NOT invent a specific "
+                            + "garment, pattern or footwear that was not visible.";
             case UNKNOWN ->
-                    "Framing: only draw the parts of the body that were described above. "
-                            + "Do NOT invent any garment that was not listed.";
+                    "Framing: draw only the garments described above. Keep anything not "
+                            + "described plain and neutral, and invent no specific garment.";
         };
+
+        // The square needs every character to be a full-body sprite of the same
+        // height; a bust would break both the crowd and the normaliser. So the
+        // resolution for a selfie is "neutral below", not "crop".
+        return base;
     }
 
     private String describeHair(ImageAnalysis.Hair hair) {
@@ -266,15 +363,45 @@ public class PromptLibrary {
             parts.add(hair.color());
         }
         String text = String.join(" ", parts) + " hair";
-        if (hair.fringe() != null && !hair.fringe().isBlank() && !"none".equalsIgnoreCase(hair.fringe())) {
+        if (hair.fringe() != null
+                && !hair.fringe().isBlank()
+                && !"none".equalsIgnoreCase(hair.fringe())) {
             text += ", " + hair.fringe();
         }
         return text.trim();
     }
 
+    /**
+     * Describes the face so the character resembles the person, while pinning
+     * the simplification level to the reference.
+     */
     private String describeFace(ImageAnalysis.Face face) {
+        if (!face.faceVisible()) {
+            return "- Face: not visible in the photo. Use the Master Character "
+                    + "Reference's neutral face unchanged. Do NOT invent a specific likeness.";
+        }
+
         List<String> parts = new ArrayList<>();
-        if (face.expression() != null && !face.expression().isBlank()) {
+        if (notBlank(face.faceShape())) {
+            parts.add(face.faceShape() + " face shape");
+        }
+        if (notBlank(face.eyeShape()) || notBlank(face.eyeSize())) {
+            parts.add(trim((face.eyeSize() == null ? "" : face.eyeSize() + " ")
+                    + (face.eyeShape() == null ? "" : face.eyeShape()) + " eyes"));
+        }
+        if (notBlank(face.eyeColor())) {
+            parts.add(face.eyeColor() + " irises");
+        }
+        if (notBlank(face.browShape())) {
+            parts.add(face.browShape() + " brows");
+        }
+        if (notBlank(face.lipShape())) {
+            parts.add(face.lipShape() + " lips");
+        }
+        if (notBlank(face.skinTone())) {
+            parts.add(face.skinTone() + " skin");
+        }
+        if (notBlank(face.expression())) {
             parts.add(face.expression() + " expression");
         }
         if (face.glasses()) {
@@ -283,9 +410,12 @@ public class PromptLibrary {
         if (face.facialHair()) {
             parts.add(face.facialHairStyle() == null ? "facial hair" : face.facialHairStyle());
         }
-        // Simple, readable features — this is a 72px sprite, not a portrait.
-        parts.add("simple two-pixel eyes and a minimal mouth");
-        return String.join(", ", parts);
+
+        return "- Face, which must resemble this person: "
+                + String.join(", ", parts)
+                + ". Render these at exactly the Master Character Reference's level of "
+                + "simplification — same eye rendering technique and highlight, same mouth "
+                + "size, same amount of detail — but with this person's shapes.";
     }
 
     private List<String> describeGarments(ImageAnalysis analysis, String... slots) {
@@ -299,14 +429,13 @@ public class PromptLibrary {
                 .sorted((a, b) -> Integer.compare(a.layer(), b.layer()))
                 .forEach(garment -> {
                     StringBuilder text = new StringBuilder();
-                    if (garment.fit() != null && !garment.fit().isBlank()) {
+                    if (notBlank(garment.fit())) {
                         text.append(garment.fit()).append(' ');
                     }
-                    if (garment.color() != null && !garment.color().isBlank()) {
+                    if (notBlank(garment.color())) {
                         text.append(garment.color()).append(' ');
                     }
-                    if (garment.pattern() != null
-                            && !garment.pattern().isBlank()
+                    if (notBlank(garment.pattern())
                             && !"solid".equalsIgnoreCase(garment.pattern())) {
                         text.append(garment.pattern()).append(' ');
                     }
@@ -316,10 +445,15 @@ public class PromptLibrary {
         return result;
     }
 
+    private boolean notBlank(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private String trim(String value) {
+        return value.replaceAll("\\s+", " ").trim();
+    }
+
     private String join(String a, String b) {
-        if (a == null || a.isBlank()) {
-            return b;
-        }
-        return a + " " + b;
+        return a == null || a.isBlank() ? b : a + " " + b;
     }
 }

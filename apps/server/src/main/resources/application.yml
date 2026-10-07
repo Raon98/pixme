@@ -145,9 +145,20 @@ pixme:
     # Which PixelImageProvider bean handles generation. Swapping providers is a
     # config change, never a code change.
     provider: ${PIXME_AI_PROVIDER:openai}
-    prompt-version: ${PIXME_PROMPT_VERSION:PIXME_V1}
+    prompt-version: ${PIXME_PROMPT_VERSION:PIXME_CHARACTER_V1}
     request-timeout: PT90S
     max-attempts: 2
+    # The official PIXME Master Character Reference, sent as "Image B" on every
+    # generation. Its geometry is measured at startup and every output is
+    # conformed to it, which is what keeps a square full of characters looking
+    # like one world.
+    master-reference:
+      resource: ${PIXME_MASTER_REFERENCE:classpath:pixme/master-character-v1.png}
+      mime-type: image/png
+      version: ${PIXME_MASTER_REFERENCE_VERSION:PIXME_MASTER_V1}
+      # Production should set this true: shipping without the reference means
+      # characters drift from the house style.
+      required: ${PIXME_MASTER_REFERENCE_REQUIRED:false}
     openai:
       api-key: ${PIXME_OPENAI_API_KEY:}
       base-url: ${PIXME_OPENAI_BASE_URL:https://api.openai.com/v1}
@@ -160,8 +171,10 @@ pixme:
       image-model: ${PIXME_FLUX_IMAGE_MODEL:flux-kontext-pro}
 
   generation:
-    # One free generation per calendar day; extras consume a paid credit.
-    free-per-day: 1
+    # There is NO daily free generation. New users get: the first generation
+    # free, one free retry of that first result, and this many bonus free
+    # credits. After those, generation is paid.
+    onboarding-bonus-credits: ${PIXME_ONBOARDING_BONUS_CREDITS:1}
     # Hard cap per day including paid credits — a backstop against runaway
     # spend from a scripted client.
     max-per-day: 20

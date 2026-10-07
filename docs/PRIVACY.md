@@ -14,6 +14,7 @@ little as possible, and to be precise about what we do hold.
 | Nickname, bio, interests | The profile | Yes |
 | Birth date | Age floor (14+) only | **No** — not even as an age |
 | Generated characters | The product | Yes |
+| Outfit + facial *shape* description | Prompt input; retry without re-reading the photo | No |
 | **Original photos** | Input to generation | **Never** |
 | Captions, moods, tags | The post | Yes |
 | Hearts, connections, messages | The social graph | Only to the parties |
@@ -45,6 +46,25 @@ The most sensitive thing the product touches, handled accordingly:
 8. **Individually deletable.** `DELETE /pixels/{id}/original` at any time.
 
 Abandoned uploads — photo picked, flow left — are reaped hourly.
+
+## The outfit and face description
+
+Generating a character means describing the photo: hairstyle, every visible
+garment with colour and pattern, and — so the character resembles the person —
+facial **shape**: eye shape and size, brow shape, lip shape, face outline, skin
+tone. That description is stored on the generation as JSON so a retry can
+re-render the same outfit without re-reading the photo.
+
+This is a coarse artistic description, not a biometric template: no face
+embedding, no landmark geometry, nothing usable for recognition or matching.
+The analysis prompt explicitly refuses age, ethnicity, nationality, body weight
+and attractiveness, and the description is purged with the account along with
+everything else.
+
+Worth being deliberate about: it is the one place where the product holds a
+written description of what someone looks like. If the AI provider's terms ever
+make that description part of their training data, this section — and the
+privacy policy — have to change.
 
 ## Account deletion
 

@@ -133,8 +133,9 @@ public class StoreController {
 
         return new StoreDtos.CreditSummaryResponse(
                 allowance.creditBalance(),
-                allowance.freeAvailable(),
-                clock.nextDayStart(),
+                allowance.firstGenerationAvailable(),
+                allowance.firstRetryAvailable(),
+                allowance.bonusFreeCredits(),
                 history);
     }
 

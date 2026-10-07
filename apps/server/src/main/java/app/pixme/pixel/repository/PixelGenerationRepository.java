@@ -16,6 +16,16 @@ public interface PixelGenerationRepository extends JpaRepository<PixelGeneration
 
     Optional<PixelGeneration> findByIdAndUserId(UUID id, UUID userId);
 
+    /** Idempotency lookup: the same client request resolves to the same row. */
+    Optional<PixelGeneration> findByUserIdAndClientRequestId(UUID userId, String clientRequestId);
+
+    /**
+     * The first-character flow lets the user compare the original with its free
+     * retry, so both candidates are fetched together.
+     */
+    List<PixelGeneration> findByUserIdAndRetryOfGenerationId(
+            UUID userId, UUID retryOfGenerationId);
+
     long countByUserIdAndPostDate(UUID userId, LocalDate postDate);
 
     /** The newest completed-but-unpublished candidate, used to resume the flow. */

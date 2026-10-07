@@ -109,11 +109,22 @@ export const copy = {
       'PIXME가 거의 완성됐어요.',
     ],
     resultTitle: '오늘의 PIXME',
+    firstResultTitle: '첫 PIXME가 완성됐어요.',
     accept: '이걸로 할래요',
     retry: '다시 만들어보기',
-    retryCostFree: '첫 생성은 무료예요.',
+    /** Only on the first character's result screen. */
+    freeRetry: '한 번 더 무료로 만들어보기',
+    freeRetryHint: '첫 PIXME는 한 번 더 무료로 만들어볼 수 있어요.',
+    /** Shown after the free retry, when there are two candidates. */
+    compareTitle: '마음에 드는 쪽을 골라주세요.',
+    compareFirst: '처음 만든 모습',
+    compareSecond: '다시 만든 모습',
+    retryCostFree: '무료로 만들 수 있어요.',
     retryCostCredit: '추가 생성권 1개가 사용돼요.',
     retryNoCredit: '생성권이 없어요. 스토어에서 받아볼까요?',
+    bonusRemaining: '무료 PIXME 생성권 1개가 남아 있어요.',
+    bonusRemainingCount: (count: number) =>
+      `무료 PIXME 생성권 ${count}개가 남아 있어요.`,
     failedTitle: '이번에는 픽셀로 옮기지 못했어요.',
     failedBody: '생성권은 사용되지 않았어요.',
     unsafeTitle: '이 사진으로는 PIXME를 만들기 어려워요.',

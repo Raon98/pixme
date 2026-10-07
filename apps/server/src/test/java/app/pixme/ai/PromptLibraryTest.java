@@ -8,49 +8,100 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * The prompt is the product here, so these tests pin the two behaviours the
- * whole concept depends on: the outfit is preserved, and nothing invisible is
- * invented.
+ * The prompt is the product here, so these tests pin the three behaviours the
+ * concept depends on: the outfit survives, the face resembles the person, and
+ * nothing invisible is invented.
  */
 class PromptLibraryTest {
 
     private final PromptLibrary prompts = new PromptLibrary();
+    private final CharacterSpec spec = CharacterSpec.reference();
 
-    @Test
-    @DisplayName("전신 사진이면 하의와 신발까지 프롬프트에 담긴다")
-    void includesLowerBodyForFullBodyPhotos() {
-        ImageAnalysis analysis = new ImageAnalysis(
-                ImageAnalysis.Framing.FULL_BODY,
+    /** The real example: the photo that produced the Master Reference. */
+    private ImageAnalysis stripedOutfit(ImageAnalysis.Framing framing) {
+        return new ImageAnalysis(
+                framing,
                 true,
-                new ImageAnalysis.Hair("medium", "wavy", "dark brown", "bangs"),
-                new ImageAnalysis.Face("calm", true, "round", false, null),
+                new ImageAnalysis.Hair("medium", "messy", "dark brown", "bangs"),
+                new ImageAnalysis.Face(
+                        true,
+                        "calm",
+                        "oval",
+                        "almond",
+                        "large",
+                        "dark brown",
+                        "straight",
+                        "small",
+                        "light",
+                        false,
+                        null,
+                        false,
+                        null),
                 List.of(
-                        new ImageAnalysis.Garment("TOP", "t-shirt", "white", "solid", 0, "regular"),
-                        new ImageAnalysis.Garment("OUTER", "denim jacket", "indigo", "solid", 1, "oversized"),
-                        new ImageAnalysis.Garment("BOTTOM", "straight jeans", "blue", "solid", 0, "regular")),
-                List.of(new ImageAnalysis.Accessory("BAG", "black", "crossbody")),
-                new ImageAnalysis.Footwear("sneakers", "white"),
-                "quiet evening walk",
-                List.of("#2E2B26"),
+                        new ImageAnalysis.Garment(
+                                "TOP", "collared knit top", "grey", "black wavy stripes", 0, "regular"),
+                        new ImageAnalysis.Garment(
+                                "BOTTOM", "wide-leg trousers", "black", "solid", 0, "oversized")),
+                List.of(new ImageAnalysis.Accessory("BAG", "black", "backpack")),
+                framing == ImageAnalysis.Framing.FULL_BODY
+                        ? new ImageAnalysis.Footwear("sneakers", "black")
+                        : null,
+                "quiet weekday",
+                List.of("#8A8A8A", "#1A1A1A"),
                 null);
-
-        String prompt = prompts.characterPrompt(analysis, PixelStyle.PIXME_BASIC);
-
-        assertThat(prompt).contains("straight jeans");
-        assertThat(prompt).contains("white sneakers");
-        assertThat(prompt).contains("full body");
-        // Layer order must be preserved: the jacket goes over the tee.
-        assertThat(prompt.indexOf("t-shirt")).isLessThan(prompt.indexOf("denim jacket"));
     }
 
     @Test
-    @DisplayName("셀카면 하의를 '만들어내지 말라'고 명시한다")
-    void forbidsInventingLowerBodyForSelfies() {
+    @DisplayName("두 레퍼런스의 역할이 프롬프트에 명시된다")
+    void statesTheTwoReferenceContract() {
+        String prompt = prompts.characterPrompt(
+                stripedOutfit(ImageAnalysis.Framing.FULL_BODY), PixelStyle.PIXME_BASIC, spec, true);
+
+        assertThat(prompt).contains("Image A is the user's photo");
+        assertThat(prompt).contains("Image B is the PIXME Master Character Reference");
+        assertThat(prompt).contains("identity and outfit reference");
+        assertThat(prompt).contains("strict visual standard");
+        assertThat(prompt).contains("Do not create a new character style");
+    }
+
+    @Test
+    @DisplayName("실제 착장이 generic으로 치환되지 않도록 못 박는다")
+    void forbidsGenericSubstitution() {
+        String prompt = prompts.characterPrompt(
+                stripedOutfit(ImageAnalysis.Framing.FULL_BODY), PixelStyle.PIXME_BASIC, spec, true);
+
+        // The actual garments, with their colours and patterns.
+        assertThat(prompt).contains("grey black wavy stripes collared knit top");
+        assertThat(prompt).contains("black wide-leg trousers");
+        assertThat(prompt).contains("black backpack");
+        assertThat(prompt).contains("black sneakers");
+        assertThat(prompt).contains("Do not replace any garment with a generic equivalent");
+    }
+
+    @Test
+    @DisplayName("얼굴은 그 사람을 닮게, 단순화 수준은 레퍼런스를 따른다")
+    void facesFollowThePersonAtTheReferenceSimplification() {
+        String prompt = prompts.characterPrompt(
+                stripedOutfit(ImageAnalysis.Framing.FULL_BODY), PixelStyle.PIXME_BASIC, spec, true);
+
+        assertThat(prompt).contains("Face, which must resemble this person");
+        assertThat(prompt).contains("almond eyes");
+        assertThat(prompt).contains("straight brows");
+        assertThat(prompt).contains("oval face shape");
+        // …but the rendering technique is pinned to the reference.
+        assertThat(prompt).contains("level of simplification");
+    }
+
+    @Test
+    @DisplayName("얼굴이 안 보이면 임의로 만들어내지 않는다")
+    void doesNotInventAFaceThatIsNotVisible() {
         ImageAnalysis analysis = new ImageAnalysis(
-                ImageAnalysis.Framing.SELFIE,
+                ImageAnalysis.Framing.UPPER_BODY,
                 true,
-                new ImageAnalysis.Hair("short", "straight", "black", "none"),
-                new ImageAnalysis.Face("smiling", false, null, false, null),
+                null,
+                new ImageAnalysis.Face(
+                        false, null, null, null, null, null, null, null, null,
+                        false, null, false, null),
                 List.of(new ImageAnalysis.Garment("TOP", "hoodie", "grey", "solid", 0, "oversized")),
                 List.of(),
                 null,
@@ -58,67 +109,113 @@ class PromptLibraryTest {
                 List.of(),
                 null);
 
-        String prompt = prompts.characterPrompt(analysis, PixelStyle.PIXME_BASIC);
+        String prompt = prompts.characterPrompt(analysis, PixelStyle.PIXME_BASIC, spec, true);
 
-        assertThat(prompt).contains("hoodie");
-        assertThat(prompt).contains("Do NOT invent");
-        assertThat(prompt).doesNotContain("Worn below");
+        assertThat(prompt).contains("not visible in the photo");
+        assertThat(prompt).contains("Do NOT invent a specific likeness");
+    }
+
+    @Test
+    @DisplayName("셀카여도 전신을 그리되 안 보이는 옷은 상상하지 않는다")
+    void selfieStillProducesAFullBodyWithoutInventingGarments() {
+        String prompt = prompts.characterPrompt(
+                stripedOutfit(ImageAnalysis.Framing.SELFIE), PixelStyle.PIXME_BASIC, spec, true);
+
+        // Every character in the square must be a full-body sprite of the same
+        // height, so a selfie yields neutral lower half — not a cropped bust.
+        assertThat(prompt).contains("Still draw a full-body character");
+        assertThat(prompt).contains("plain and neutral");
+        assertThat(prompt).contains("Do NOT invent a specific garment");
         assertThat(prompt).doesNotContain("Shoes:");
     }
 
     @Test
-    @DisplayName("상반신 사진은 엉덩이 아래로 그리지 않는다")
-    void fadesOutUpperBodyFraming() {
+    @DisplayName("레이어 순서가 보존된다")
+    void preservesLayerOrder() {
         ImageAnalysis analysis = new ImageAnalysis(
-                ImageAnalysis.Framing.UPPER_BODY,
+                ImageAnalysis.Framing.FULL_BODY,
                 true,
                 null,
                 null,
-                List.of(new ImageAnalysis.Garment("TOP", "knit sweater", "cream", "solid", 0, "regular")),
+                List.of(
+                        new ImageAnalysis.Garment("OUTER", "denim jacket", "indigo", "solid", 1, "oversized"),
+                        new ImageAnalysis.Garment("TOP", "t-shirt", "white", "solid", 0, "regular")),
                 List.of(),
                 null,
                 null,
                 List.of(),
                 null);
 
-        String prompt = prompts.characterPrompt(analysis, PixelStyle.PIXME_BASIC);
+        String prompt = prompts.characterPrompt(analysis, PixelStyle.PIXME_BASIC, spec, true);
 
-        assertThat(prompt).contains("upper body");
-        assertThat(prompt).contains("Do NOT invent trousers");
+        assertThat(prompt.indexOf("t-shirt")).isLessThan(prompt.indexOf("denim jacket"));
     }
 
     @Test
-    @DisplayName("모든 스타일이 같은 세계관 규칙을 공유한다")
-    void everyStyleSharesTheHouseConstruction() {
-        ImageAnalysis analysis = new ImageAnalysis(
-                ImageAnalysis.Framing.FULL_BODY, true, null, null, List.of(), List.of(),
-                null, null, List.of(), null);
+    @DisplayName("모든 스타일이 같은 뼈대 규격을 공유한다")
+    void everyStyleSharesTheFixedConstruction() {
+        ImageAnalysis analysis = stripedOutfit(ImageAnalysis.Framing.FULL_BODY);
 
         for (PixelStyle style : PixelStyle.values()) {
-            String prompt = prompts.characterPrompt(analysis, style);
-            assertThat(prompt).as("style %s", style).contains("Fully transparent background");
+            String prompt = prompts.characterPrompt(analysis, style, spec, true);
+            assertThat(prompt).as("style %s", style).contains("FULLY TRANSPARENT");
             assertThat(prompt).as("style %s", style).contains("Slightly oversized head");
-            assertThat(prompt).as("style %s", style).contains("photorealism, 3D render");
             assertThat(prompt).as("style %s", style).contains("one consistent grid");
+            assertThat(prompt).as("style %s", style).contains("photorealism, 3D render");
+            if (style != PixelStyle.PIXME_BASIC) {
+                // Variations may change palette, never construction.
+                assertThat(prompt).as("style %s", style).contains("proportions unchanged");
+            }
         }
     }
 
     @Test
-    @DisplayName("착장 보존이 다른 요소보다 우선한다고 명시한다")
-    void statesPriorityOrder() {
-        ImageAnalysis analysis = new ImageAnalysis(
-                ImageAnalysis.Framing.FULL_BODY, true, null, null, List.of(), List.of(),
-                null, null, List.of(), null);
+    @DisplayName("규격 수치가 프롬프트에 숫자로 들어간다")
+    void injectsTheMeasuredGeometry() {
+        String prompt = prompts.characterPrompt(
+                stripedOutfit(ImageAnalysis.Framing.FULL_BODY), PixelStyle.PIXME_BASIC, spec, true);
 
-        assertThat(prompts.characterPrompt(analysis, PixelStyle.PIXME_BASIC))
-                .contains("garment identity and colour first");
+        // Stated numerically so a vague reading of Image B cannot drift.
+        assertThat(prompt).contains("%.0f%%".formatted(spec.headRatio() * 100));
+        assertThat(prompt).contains("%.1f heads tall".formatted(spec.headsTall()));
+        assertThat(prompt).contains("%.0f%% of the canvas height".formatted(
+                spec.characterHeightRatio() * 100));
     }
 
     @Test
-    @DisplayName("분석 프롬프트는 외모·인종 묘사를 금지한다")
-    void analysisPromptForbidsPersonalDescription() {
+    @DisplayName("레퍼런스의 배경과 그림자는 규격이 아니라고 못 박는다")
+    void excludesTheReferenceBackgroundFromTheStandard() {
+        String prompt = prompts.characterPrompt(
+                stripedOutfit(ImageAnalysis.Framing.FULL_BODY), PixelStyle.PIXME_BASIC, spec, true);
+
+        // The shipped reference is exported on a flat background with a ground
+        // shadow; copying that would break compositing in the feed and square.
+        assertThat(prompt).contains("that is not");
+        assertThat(prompt).contains("No ground shadow");
+    }
+
+    @Test
+    @DisplayName("레퍼런스가 없으면 그 사실을 프롬프트에 반영한다")
+    void degradesHonestlyWithoutTheReference() {
+        String prompt = prompts.characterPrompt(
+                stripedOutfit(ImageAnalysis.Framing.FULL_BODY), PixelStyle.PIXME_BASIC, spec, false);
+
+        assertThat(prompt).doesNotContain("Image B");
+        // The construction is still stated in full, so output stays coherent.
+        assertThat(prompt).contains("Slightly oversized head");
+    }
+
+    @Test
+    @DisplayName("분석 프롬프트는 얼굴 '형태'는 받고 나이·인종은 거부한다")
+    void analysisPromptAsksForShapeNotProfiling() {
         String prompt = prompts.analysisSystemPrompt();
-        assertThat(prompt).contains("Do NOT describe the person's age, ethnicity, body shape");
+
+        assertThat(prompt).contains("eye shape");
+        assertThat(prompt).contains("brow shape");
+        assertThat(prompt).contains("lip shape");
+        assertThat(prompt).contains("the person would recognise themselves");
+        assertThat(prompt).contains("Do NOT state the person's age, ethnicity");
+        assertThat(prompt).contains("Never invent a face");
         assertThat(prompt).contains("Never guess");
     }
 }

@@ -1,9 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
+import { Dimensions, Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
 
+import { pixelsApi, type PixelGeneration } from '@/api';
 import { copy } from '@/constants/copy';
-import { layout, radius, spacing, useTheme } from '@/theme';
+import { haptics } from '@/lib/haptics';
+import { layout, opacity, radius, spacing, useTheme } from '@/theme';
 import { Button, ConfirmDialog, Header, PixelCharacter, Screen, Text } from '@/ui';
 import { useGenerationStore } from '@/features/generation/generationStore';
 import { useTodayStatus } from '@/features/feed/useTodayFeed';
@@ -12,22 +15,60 @@ import { useAuthStore } from '@/features/auth/authStore';
 /**
  * Generation result.
  *
- * The first generation of the day is free; "다시 만들어보기" costs a credit,
- * and we say so *before* spending it. If the user has no credit we offer the
- * store rather than silently disabling the button, so the cost is always
- * legible and never a surprise charge.
+ * <p>Two shapes, depending on where the user is:
+ *
+ * - **First character.** The retry is free and offered explicitly, because the
+ *   thing we most want to prevent is someone leaving because the very first AI
+ *   result disappointed them. Once they've used it, both candidates are shown
+ *   side by side and they pick — comparing is much easier than remembering.
+ * - **Any later character.** The normal result, with the cost of another
+ *   attempt stated *before* it is spent. If there is nothing left to spend, we
+ *   offer the store rather than silently disabling the button.
  */
 export default function ResultRoute() {
   const router = useRouter();
   const { colors } = useTheme();
 
   const draft = useGenerationStore((state) => state.draft);
+  const setGeneration = useGenerationStore((state) => state.setGeneration);
   const entitlements = useAuthStore((state) => state.user?.entitlements ?? null);
   const todayStatus = useTodayStatus();
 
   const [retryPrompt, setRetryPrompt] = useState(false);
 
   const generation = draft?.generation ?? null;
+
+  /**
+   * The original and its retries. Only meaningful in the first-character flow,
+   * but asking always keeps this screen free of flow-specific branching.
+   */
+  const candidates = useQuery({
+    queryKey: ['pixels', 'candidates', generation?.id ?? 'none'],
+    queryFn: () => pixelsApi.candidates(generation!.id),
+    enabled: !!generation && generation.status === 'COMPLETED',
+    staleTime: 30_000,
+  });
+
+  const completed = useMemo(
+    () =>
+      (candidates.data ?? []).filter(
+        (candidate) => candidate.characterImageUrl !== null,
+      ),
+    [candidates.data],
+  );
+
+  const comparing = completed.length > 1;
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = useMemo(() => {
+    if (!comparing) return generation;
+    return (
+      completed.find((candidate) => candidate.id === selectedId) ??
+      // Default to the newest, which is what the user just watched appear.
+      completed[completed.length - 1] ??
+      generation
+    );
+  }, [comparing, completed, generation, selectedId]);
 
   const characterSize = useMemo(
     () =>
@@ -38,22 +79,42 @@ export default function ResultRoute() {
     [],
   );
 
-  const freeAvailable = entitlements?.freeGenerationAvailable ?? false;
+  const freeRetryAvailable =
+    entitlements?.firstRetryAvailable ??
+    todayStatus.data?.firstRetryAvailable ??
+    false;
+  const bonusFree = entitlements?.bonusFreeCredits ?? 0;
   const credits = entitlements?.creditBalance ?? 0;
 
-  const retryCostLabel = freeAvailable
-    ? copy.generation.retryCostFree
-    : credits > 0
-      ? copy.generation.retryCostCredit
-      : copy.generation.retryNoCredit;
+  const retryCostLabel = freeRetryAvailable
+    ? copy.generation.freeRetryHint
+    : bonusFree > 0
+      ? copy.generation.bonusRemainingCount(bonusFree)
+      : credits > 0
+        ? copy.generation.retryCostCredit
+        : copy.generation.retryNoCredit;
 
   const onRetry = useCallback(() => {
-    if (!freeAvailable && credits <= 0) {
+    if (!freeRetryAvailable && bonusFree <= 0 && credits <= 0) {
       router.push('/store');
       return;
     }
+    // A free retry needs no confirmation — the whole point is that it costs
+    // nothing and should feel effortless.
+    if (freeRetryAvailable) {
+      router.replace({ pathname: '/create/generating', params: { retry: '1' } });
+      return;
+    }
     setRetryPrompt(true);
-  }, [credits, freeAvailable, router]);
+  }, [bonusFree, credits, freeRetryAvailable, router]);
+
+  const onAccept = useCallback(() => {
+    if (selected && selected.id !== generation?.id) {
+      // Publish whichever candidate the user chose, not whichever was last.
+      setGeneration(selected);
+    }
+    router.replace('/create/publish');
+  }, [generation?.id, router, selected, setGeneration]);
 
   if (!generation || !generation.characterImageUrl) {
     return (
@@ -77,17 +138,20 @@ export default function ResultRoute() {
     );
   }
 
+  const isFirstCharacter = freeRetryAvailable || comparing;
+
   return (
     <>
       <Screen
         footer={
           <View>
+            <Button label={copy.generation.accept} onPress={onAccept} />
             <Button
-              label={copy.generation.accept}
-              onPress={() => router.replace('/create/publish')}
-            />
-            <Button
-              label={copy.generation.retry}
+              label={
+                freeRetryAvailable
+                  ? copy.generation.freeRetry
+                  : copy.generation.retry
+              }
               variant="ghost"
               onPress={onRetry}
               style={styles.ghost}
@@ -108,63 +172,79 @@ export default function ResultRoute() {
           onBack={() => router.replace('/(tabs)')}
         />
 
-        <View style={styles.body}>
-          <View
-            style={[
-              styles.stage,
-              { backgroundColor: colors.stage, borderColor: colors.border },
-            ]}
-          >
-            <PixelCharacter
-              uri={generation.characterImageUrl}
-              size={characterSize}
-              idle
-              priority="high"
-              accessibilityLabel="방금 만들어진 내 PIXME"
-            />
+        {comparing ? (
+          <View style={styles.body}>
+            <Text variant="title2" align="center" style={styles.compareTitle}>
+              {copy.generation.compareTitle}
+            </Text>
+
+            <View style={styles.compareRow}>
+              {completed.map((candidate, index) => (
+                <CandidateCard
+                  key={candidate.id}
+                  candidate={candidate}
+                  label={
+                    index === 0
+                      ? copy.generation.compareFirst
+                      : copy.generation.compareSecond
+                  }
+                  selected={selected?.id === candidate.id}
+                  onPress={() => {
+                    haptics.selection();
+                    setSelectedId(candidate.id);
+                  }}
+                />
+              ))}
+            </View>
           </View>
-
-          <Text variant="title2" align="center" style={styles.title}>
-            {copy.generation.resultTitle}
-          </Text>
-
-          {draft && draft.candidates.length > 1 ? (
-            <Text
-              variant="micro"
-              tone="tertiary"
-              align="center"
-              style={styles.candidates}
+        ) : (
+          <View style={styles.body}>
+            <View
+              style={[
+                styles.stage,
+                { backgroundColor: colors.stage, borderColor: colors.border },
+              ]}
             >
-              오늘 만든 후보 {draft.candidates.length}개 중 마지막 모습이에요.
-            </Text>
-          ) : null}
+              <PixelCharacter
+                uri={generation.characterImageUrl}
+                size={characterSize}
+                idle
+                priority="high"
+                accessibilityLabel="방금 만들어진 내 PIXME"
+              />
+            </View>
 
-          {todayStatus.data?.myTodayPost ? (
-            <Text
-              variant="caption"
-              tone="secondary"
-              align="center"
-              style={styles.replaceNotice}
-            >
-              {copy.publish.replaceBody}
+            <Text variant="title2" align="center" style={styles.title}>
+              {isFirstCharacter
+                ? copy.generation.firstResultTitle
+                : copy.generation.resultTitle}
             </Text>
-          ) : null}
-        </View>
+
+            {todayStatus.data?.myTodayPost ? (
+              <Text
+                variant="caption"
+                tone="secondary"
+                align="center"
+                style={styles.replaceNotice}
+              >
+                {copy.publish.replaceBody}
+              </Text>
+            ) : null}
+          </View>
+        )}
       </Screen>
 
       <ConfirmDialog
         visible={retryPrompt}
         title={copy.generation.retry}
         body={
-          freeAvailable
-            ? copy.generation.retryCostFree
+          bonusFree > 0
+            ? copy.generation.bonusRemainingCount(bonusFree)
             : copy.generation.retryCostCredit
         }
         confirmLabel={copy.generation.retry}
         onConfirm={() => {
           setRetryPrompt(false);
-          // `retry=1` tells the generating screen to re-render the stored
-          // analysis rather than replay the upload, which is single-use.
           router.replace({
             pathname: '/create/generating',
             params: { retry: '1' },
@@ -176,6 +256,52 @@ export default function ResultRoute() {
   );
 }
 
+function CandidateCard({
+  candidate,
+  label,
+  selected,
+  onPress,
+}: {
+  candidate: PixelGeneration;
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.candidate,
+        {
+          backgroundColor: colors.stage,
+          borderColor: selected ? colors.accent : colors.border,
+          borderWidth: selected ? 2 : StyleSheet.hairlineWidth,
+          opacity: pressed ? opacity.pressed : 1,
+        },
+      ]}
+    >
+      <PixelCharacter
+        uri={candidate.characterImageUrl}
+        size={128}
+        idle={selected}
+        accessibilityLabel={label}
+      />
+      <Text
+        variant="label"
+        tone={selected ? 'accent' : 'secondary'}
+        style={styles.candidateLabel}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   body: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   stage: {
@@ -184,7 +310,16 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   title: { marginTop: spacing.xl },
-  candidates: { marginTop: spacing.sm },
+  compareTitle: { marginBottom: spacing.xl },
+  compareRow: { flexDirection: 'row' },
+  candidate: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+    marginHorizontal: spacing.xs,
+    borderRadius: radius.xl,
+  },
+  candidateLabel: { marginTop: spacing.md },
   replaceNotice: { marginTop: spacing.base, maxWidth: 300 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   retry: { marginTop: spacing.lg, minWidth: 180 },

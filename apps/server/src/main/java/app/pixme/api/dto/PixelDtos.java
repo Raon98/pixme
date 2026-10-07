@@ -20,9 +20,16 @@ public final class PixelDtos {
 
     /* -------------------------------------------------------- generation */
 
-    public record StartGenerationRequest(@NotBlank String uploadId, String style) {}
+    /**
+     * @param clientRequestId idempotency key. A double-tapped button or a
+     *     network retry resolves to the same generation instead of a second
+     *     charge.
+     */
+    public record StartGenerationRequest(
+            @NotBlank String uploadId, String style, String clientRequestId) {}
 
-    public record RetryGenerationRequest(@NotBlank String generationId, String style) {}
+    public record RetryGenerationRequest(
+            @NotBlank String generationId, String style, String clientRequestId) {}
 
     public record GenerationResponse(
             String id,
@@ -31,8 +38,12 @@ public final class PixelDtos {
             int progress,
             String characterImageUrl,
             String failureReason,
+            /** FREE_FIRST · FREE_FIRST_RETRY · FREE_BONUS · PAID_CREDIT */
+            String spendKind,
             boolean usedFreeGeneration,
             boolean usedCredit,
+            /** Set when this render is a retry, pointing at the original. */
+            String retryOfGenerationId,
             Instant createdAt,
             Instant completedAt) {}
 
@@ -88,8 +99,11 @@ public final class PixelDtos {
 
     public record TodayStatusResponse(
             PostResponse myTodayPost,
-            boolean freeGenerationAvailable,
+            boolean firstGenerationAvailable,
+            boolean firstRetryAvailable,
+            int bonusFreeCredits,
             int creditBalance,
+            boolean nextGenerationIsFree,
             String pendingGenerationId) {}
 
     public record SignedUrlResponse(String url, Instant expiresAt) {}

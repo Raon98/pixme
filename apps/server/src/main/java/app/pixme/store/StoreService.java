@@ -197,13 +197,28 @@ public class StoreService {
 
     /* ------------------------------------------------------- entitlements */
 
+    /**
+     * Everything the client needs to describe what a generation will cost.
+     *
+     * <p>The three free fields are separate rather than a single count because
+     * they behave differently: the first retry is only reachable from the first
+     * result screen, while the bonus credit can be spent any time.
+     */
     public record Entitlements(
             boolean plusActive,
             Instant plusExpiresAt,
             int creditBalance,
-            boolean freeGenerationAvailable,
+            boolean firstGenerationAvailable,
+            boolean firstRetryAvailable,
+            int bonusFreeCredits,
             Set<String> unlockedStyles,
-            Set<String> unlockedDecorations) {}
+            Set<String> unlockedDecorations) {
+
+        /** True when starting a new PIXME right now costs nothing. */
+        public boolean nextGenerationIsFree() {
+            return firstGenerationAvailable || bonusFreeCredits > 0;
+        }
+    }
 
     @Transactional(readOnly = true)
     public Entitlements entitlements(UUID userId) {
@@ -214,7 +229,9 @@ public class StoreService {
                 !active.isEmpty(),
                 active.isEmpty() ? null : active.get(0).getCurrentPeriodEnd(),
                 allowance.creditBalance(),
-                allowance.freeAvailable(),
+                allowance.firstGenerationAvailable(),
+                allowance.firstRetryAvailable(),
+                allowance.bonusFreeCredits(),
                 Set.copyOf(unlockRepository.findCodesByUserIdAndKind(userId, "STYLE")),
                 Set.copyOf(unlockRepository.findCodesByUserIdAndKind(userId, "DECORATION")));
     }

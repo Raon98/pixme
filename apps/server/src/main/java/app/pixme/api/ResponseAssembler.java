@@ -120,8 +120,11 @@ public class ResponseAssembler {
         return new EntitlementsResponse(
                 entitlements.plusActive(),
                 entitlements.plusExpiresAt(),
-                entitlements.freeGenerationAvailable(),
+                entitlements.firstGenerationAvailable(),
+                entitlements.firstRetryAvailable(),
+                entitlements.bonusFreeCredits(),
                 entitlements.creditBalance(),
+                entitlements.nextGenerationIsFree(),
                 List.copyOf(entitlements.unlockedStyles()),
                 List.copyOf(entitlements.unlockedDecorations()));
     }
@@ -274,8 +277,12 @@ public class ResponseAssembler {
                 generation.getFailureReason() == null
                         ? null
                         : generation.getFailureReason().name(),
+                generation.getSpendKind().name(),
                 generation.isUsedFreeGeneration(),
                 generation.isUsedCredit(),
+                generation.getRetryOfGenerationId() == null
+                        ? null
+                        : generation.getRetryOfGenerationId().toString(),
                 generation.getCreatedAt(),
                 generation.getCompletedAt());
     }

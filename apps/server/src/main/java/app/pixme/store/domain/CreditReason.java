@@ -1,5 +1,13 @@
 package app.pixme.store.domain;
 
+/**
+ * Reasons a <em>paid</em> credit balance moved.
+ *
+ * <p>Free allowances (first generation, first retry, bonus credit) are not in
+ * the ledger: mixing them in would make {@code balance_after} meaningless.
+ * Which free currency a generation consumed is recorded on the generation
+ * itself.
+ */
 public enum CreditReason {
     PURCHASE,
     GENERATION,

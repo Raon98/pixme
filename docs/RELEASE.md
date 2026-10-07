@@ -4,6 +4,20 @@ Everything below is a real prerequisite for a first App Store / Play
 submission. Items marked **blocking** cannot be deferred — they are either a
 legal requirement, a store rejection risk, or a correctness hole.
 
+## 0. Character reference
+
+- [ ] **blocking** Install the official master character image at
+      `apps/server/src/main/resources/pixme/master-character-v1.png`. Without it
+      the server warns and generates from the prompt alone, and the character
+      family drifts.
+- [ ] **blocking** `PIXME_MASTER_REFERENCE_REQUIRED=true` in production, so a
+      deploy cannot silently ship without it.
+- [ ] Check the `measured spec` line in the startup log (head ratio, canvas
+      occupancy, foot baseline) — every character is normalised to it.
+- [ ] With a real provider key, generate from ~10 varied photos and look at them
+      together. The prompt and the normaliser guarantee proportion and
+      alignment; stylistic coherence depends on the reference itself.
+
 ## Accounts and credentials
 
 - [ ] **blocking** Apple Developer Program; bundle id `com.pixme.app`
@@ -33,6 +47,9 @@ legal requirement, a store rejection risk, or a correctness hole.
       store screen and in Settings
 - [ ] Sandbox tested end to end: purchase, grant, restore, **deferred/pending
       payment on Play**, and expiry
+- [ ] **blocking** Walk the free-chance funnel on a real device: first
+      generation → free retry → bonus credit → paywall. There is no daily free
+      generation, so a break here loses every new user at the same point.
 
 ## Legal and privacy
 

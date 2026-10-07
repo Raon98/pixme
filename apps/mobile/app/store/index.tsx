@@ -125,9 +125,11 @@ export default function StoreRoute() {
             </Text>
           </View>
           <Text variant="micro" tone="tertiary">
-            {entitlements?.freeGenerationAvailable
-              ? '오늘 무료 생성 1회가 남아 있어요.'
-              : '오늘 무료 생성을 사용했어요.'}
+            {entitlements?.firstGenerationAvailable
+              ? '첫 PIXME는 무료로 만들 수 있어요.'
+              : (entitlements?.bonusFreeCredits ?? 0) > 0
+                ? copy.generation.bonusRemainingCount(entitlements!.bonusFreeCredits)
+                : '무료 생성을 모두 사용했어요.'}
           </Text>
         </Card>
 

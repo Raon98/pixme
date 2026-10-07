@@ -32,6 +32,26 @@ they are "today, one card per person".
   (`PixelPostService.publish`).
 - Re-publishing the same generation is idempotent.
 
+### Every PIXME shares one skeleton
+
+The person and the outfit change. The construction — proportions, head-to-body
+ratio, scale, pixel density, how far features are simplified, pose, canvas
+occupancy, foot baseline, centring — never does. That is what makes a square
+full of strangers look like one world instead of a collage.
+
+Enforced in three places, because a prompt alone is not enough:
+
+1. The official reference image is sent to the provider as **Image B** on every
+   generation (`MasterCharacterReference`).
+2. Its geometry is **measured** at startup into `CharacterSpec` and stated
+   numerically in the prompt, so a vague reading of the picture cannot drift.
+3. Every result is **conformed** to that spec by `CharacterNormalizer` —
+   trimmed, nearest-neighbour scaled, centred, soles on the baseline.
+
+The face is the one deliberate nuance: its **shape** follows the person (eye
+shape, brows, lips — the character should look like them), while its
+**rendering** is fixed by the reference. See `AI.md`.
+
 ### The day boundary is a product decision
 
 `postDate` is resolved in `Asia/Seoul`, not UTC, so a PIXME made at 1am belongs
@@ -103,6 +123,33 @@ generations, styles and decoration.
 **Clothing is never sold.** The entire premise is that the character wears what
 the person actually wore.
 
+### Free generation is an onboarding grant, not a daily allowance
+
+There is **no** daily free generation. A new account gets three free chances,
+and they are deliberately three *different currencies* rather than a counter of
+three:
+
+| # | Currency | Scope |
+| --- | --- | --- |
+| 1 | First generation | Once per account. Nobody should pay to find out what the product does. |
+| 2 | First retry | Once, and **only on the first character's result screen**. |
+| 3 | Bonus free credit | One, usable any time afterwards. |
+
+After those, generation is paid.
+
+The retry exists for one reason: to stop someone leaving because the very first
+AI result disappointed them. So it is scoped to that moment and cannot be
+hoarded — a later "make another PIXME" spends the bonus credit, never the
+retry. Once it has been used, the user picks between the two candidates side by
+side, because comparing is much easier than remembering.
+
+The bonus credit exists so a user can discover the thing the whole product rests
+on: *a different outfit produces a different PIXME.*
+
+Collapsing these into one number would lose exactly the distinctions that make
+them work — and would make a refund unable to give back the right thing, which
+is why `SpendKind` is recorded on every generation.
+
 ### The user never pays for a character they didn't get
 
 - The allowance is spent *before* dispatch, so two parallel requests can't both
@@ -148,8 +195,8 @@ the character exists. See `PRIVACY.md`.
 
 | Thing | Price source |
 | --- | --- |
-| Daily first generation | Free, always |
-| Extra generations | `products` table, 1 / 3 / 10 packs |
+| First generation, its retry, one bonus credit | Free, once per account |
+| Further generations | `products` table, 1 / 3 / 10 packs |
 | Styles | `products` table, non-consumable unlocks |
 | Decoration (backgrounds, frames, effects, themes) | `products` table |
 | PIXME+ | Subscription; monthly credit grant + cosmetics |
