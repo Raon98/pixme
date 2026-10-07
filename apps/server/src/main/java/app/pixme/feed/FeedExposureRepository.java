@@ -14,20 +14,20 @@ public interface FeedExposureRepository extends JpaRepository<FeedExposure, Feed
     /** How many times each author has already been shown to this viewer today. */
     @Query("""
             select e.authorId, count(e) from FeedExposure e
-            where e.key.viewerId = :viewerId and e.postDate = :postDate
+            where e.key.viewerId = :viewerId and e.statusDate = :statusDate
             group by e.authorId
             """)
     List<Object[]> countByAuthorForDay(
-            @Param("viewerId") UUID viewerId, @Param("postDate") LocalDate postDate);
+            @Param("viewerId") UUID viewerId, @Param("statusDate") LocalDate statusDate);
 
     @Query("""
-            select e.key.postId from FeedExposure e
-            where e.key.viewerId = :viewerId and e.postDate = :postDate
+            select e.key.dailyStatusId from FeedExposure e
+            where e.key.viewerId = :viewerId and e.statusDate = :statusDate
             """)
-    List<UUID> findSeenPostIds(
-            @Param("viewerId") UUID viewerId, @Param("postDate") LocalDate postDate);
+    List<UUID> findSeenDailyStatusIds(
+            @Param("viewerId") UUID viewerId, @Param("statusDate") LocalDate statusDate);
 
     @Modifying
-    @Query("delete from FeedExposure e where e.postDate < :threshold")
+    @Query("delete from FeedExposure e where e.statusDate < :threshold")
     int deleteOlderThan(@Param("threshold") LocalDate threshold);
 }

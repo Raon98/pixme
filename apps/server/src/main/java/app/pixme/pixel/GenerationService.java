@@ -323,9 +323,9 @@ public class GenerationService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<PixelGeneration> latestUnpublishedCandidate(UUID userId) {
+    public Optional<PixelGeneration> latestUnkeptCandidate(UUID userId) {
         List<PixelGeneration> candidates =
-                generationRepository.findUnpublishedCandidates(userId, clock.today());
+                generationRepository.findUnkeptCandidates(userId, clock.today());
         return candidates.isEmpty() ? Optional.empty() : Optional.of(candidates.get(0));
     }
 

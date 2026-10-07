@@ -7,9 +7,9 @@ import app.pixme.chat.ChatService;
 import app.pixme.config.PixmeProperties;
 import app.pixme.connection.ConnectionService;
 import app.pixme.notification.NotificationService;
-import app.pixme.pixel.domain.PixelPost;
+import app.pixme.pixel.domain.PixelCharacter;
+import app.pixme.pixel.repository.PixelCharacterRepository;
 import app.pixme.pixel.repository.PixelGenerationRepository;
-import app.pixme.pixel.repository.PixelPostRepository;
 import app.pixme.pixel.repository.PixelUploadRepository;
 import app.pixme.storage.StorageService;
 import app.pixme.user.domain.User;
@@ -40,7 +40,7 @@ public class AccountPurgeJob {
     private static final Logger log = LoggerFactory.getLogger(AccountPurgeJob.class);
 
     private final UserRepository userRepository;
-    private final PixelPostRepository postRepository;
+    private final PixelCharacterRepository characterRepository;
     private final PixelGenerationRepository generationRepository;
     private final PixelUploadRepository uploadRepository;
     private final ChatService chatService;
@@ -51,7 +51,7 @@ public class AccountPurgeJob {
 
     public AccountPurgeJob(
             UserRepository userRepository,
-            PixelPostRepository postRepository,
+            PixelCharacterRepository characterRepository,
             PixelGenerationRepository generationRepository,
             PixelUploadRepository uploadRepository,
             ChatService chatService,
@@ -60,7 +60,7 @@ public class AccountPurgeJob {
             StorageService storage,
             PixmeProperties properties) {
         this.userRepository = userRepository;
-        this.postRepository = postRepository;
+        this.characterRepository = characterRepository;
         this.generationRepository = generationRepository;
         this.uploadRepository = uploadRepository;
         this.chatService = chatService;
@@ -92,10 +92,10 @@ public class AccountPurgeJob {
         var userId = user.getId();
 
         // 1. Storage objects, while we still know their keys.
-        for (PixelPost post : postRepository.findByUserId(userId)) {
-            storage.deleteCharacter(post.getCharacterObjectKey());
-            if (post.hasOriginal()) {
-                storage.deleteOriginal(post.getOriginalObjectKey());
+        for (PixelCharacter character : characterRepository.findByUserId(userId)) {
+            storage.deleteCharacter(character.getCharacterObjectKey());
+            if (character.hasOriginal()) {
+                storage.deleteOriginal(character.getOriginalObjectKey());
             }
         }
         generationRepository.findByUserId(userId).forEach(generation -> {

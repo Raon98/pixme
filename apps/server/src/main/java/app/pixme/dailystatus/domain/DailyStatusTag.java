@@ -1,4 +1,4 @@
-package app.pixme.pixel.domain;
+package app.pixme.dailystatus.domain;
 
 import java.io.Serializable;
 import java.util.Objects;
@@ -13,25 +13,22 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/**
- * Tags as rows rather than an array column, so tag-based discovery
- * ("#꾸안꾸 today") is an index lookup instead of a scan.
- */
+/** Tags as rows, so tag-based discovery is an index lookup, not a scan. */
 @Entity
-@Table(name = "pixel_post_tags")
+@Table(name = "daily_status_tags")
 @Getter
 @NoArgsConstructor
-public class PixelPostTag {
+public class DailyStatusTag {
 
     @EmbeddedId
     private Key key;
 
-    public PixelPostTag(UUID postId, String tag) {
-        this.key = new Key(postId, tag);
+    public DailyStatusTag(UUID dailyStatusId, String tag) {
+        this.key = new Key(dailyStatusId, tag);
     }
 
-    public UUID getPostId() {
-        return key.getPostId();
+    public UUID getDailyStatusId() {
+        return key.getDailyStatusId();
     }
 
     public String getTag() {
@@ -43,14 +40,14 @@ public class PixelPostTag {
     @NoArgsConstructor
     public static class Key implements Serializable {
 
-        @Column(name = "post_id", nullable = false)
-        private UUID postId;
+        @Column(name = "daily_status_id", nullable = false)
+        private UUID dailyStatusId;
 
         @Column(name = "tag", nullable = false, length = 12)
         private String tag;
 
-        public Key(UUID postId, String tag) {
-            this.postId = postId;
+        public Key(UUID dailyStatusId, String tag) {
+            this.dailyStatusId = dailyStatusId;
             this.tag = tag;
         }
 
@@ -62,12 +59,12 @@ public class PixelPostTag {
             if (!(other instanceof Key key)) {
                 return false;
             }
-            return Objects.equals(postId, key.postId) && Objects.equals(tag, key.tag);
+            return Objects.equals(dailyStatusId, key.dailyStatusId) && Objects.equals(tag, key.tag);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(postId, tag);
+            return Objects.hash(dailyStatusId, tag);
         }
     }
 }

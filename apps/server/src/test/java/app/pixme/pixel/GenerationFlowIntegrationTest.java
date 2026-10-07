@@ -11,7 +11,8 @@ import app.pixme.ai.PixelStyle;
 import app.pixme.feed.FeedService;
 import app.pixme.pixel.domain.GenerationStatus;
 import app.pixme.pixel.domain.PixelGeneration;
-import app.pixme.pixel.domain.PixelPost;
+import app.pixme.dailystatus.DailyStatusService;
+import app.pixme.dailystatus.domain.DailyStatus;
 import app.pixme.square.SquareService;
 import app.pixme.storage.StorageService;
 import app.pixme.store.CreditService;
@@ -42,7 +43,10 @@ class GenerationFlowIntegrationTest {
     private GenerationService generationService;
 
     @Autowired
-    private PixelPostService postService;
+    private PixelCharacterService characterService;
+
+    @Autowired
+    private DailyStatusService dailyStatusService;
 
     @Autowired
     private FeedService feedService;
@@ -84,9 +88,10 @@ class GenerationFlowIntegrationTest {
     void clearTodaysContent() {
         jdbc.update("delete from feed_exposures");
         jdbc.update("delete from square_placements");
+        jdbc.update("delete from square_presence");
         jdbc.update("delete from reactions");
-        jdbc.update("delete from pixel_post_tags");
-        jdbc.update("delete from pixel_posts");
+        jdbc.update("delete from daily_status_tags");
+        jdbc.update("delete from daily_status");
     }
 
     @Test
@@ -135,26 +140,33 @@ class GenerationFlowIntegrationTest {
         // The analysis is stored so a retry can reuse the outfit.
         assertThat(finished.getAnalysisJson()).isNotBlank();
 
-        // --- 3. publish ------------------------------------------------------
-        PixelPost post = postService.publish(
-                author.getId(),
-                finished.getId(),
-                new PixelPostService.PublishCommand(
-                        "오늘은 그냥 산책.", "HAPPY", List.of("산책", "카페"), false));
+        // --- 3. keep as the Current PIXME, with today's status -------------
+        characterService.keep(author.getId(), finished.getId(), true, true, null);
+        dailyStatusService.upsertStatus(
+                author.getId(), "HAPPY", "오늘은 그냥 산책.", List.of("산책", "카페"), null);
 
-        assertThat(post.isRepresentative()).isTrue();
         assertThat(userService.statsOf(author.getId()).getPixelCount()).isEqualTo(1);
+
+        // Opt in to the square so presence actually registers.
+        userService.updateProfile(
+                author.getId(),
+                new UserService.UpdateProfileCommand(
+                        null, null, null, false, null,
+                        new UserService.SettingsPatch(
+                                null, null, null, null, null, null, true)));
 
         // --- 4. it shows up in someone else's feed ---------------------------
         FeedService.FeedPage feed = feedService.today(viewer.getId(), null, 10);
-        assertThat(feed.posts()).extracting(PixelPost::getId).contains(post.getId());
+        DailyStatus myStatus = dailyStatusService.today(author.getId()).orElseThrow();
+        assertThat(feed.statuses()).extracting(DailyStatus::getId).contains(myStatus.getId());
 
         // --- 5. and it is standing in the square at a stable coordinate ------
+        squareService.recordPresenceIfVisible(author.getId());
         SquareService.SquareView square = squareService.today(viewer.getId(), 40);
         assertThat(square.scene()).isNotNull();
 
         var occupant = square.occupants().stream()
-                .filter(entry -> entry.post().getId().equals(post.getId()))
+                .filter(entry -> entry.presence().getUserId().equals(author.getId()))
                 .findFirst();
         assertThat(occupant).isPresent();
 
@@ -164,7 +176,7 @@ class GenerationFlowIntegrationTest {
         // Refreshing must not teleport the crowd.
         SquareService.SquareView again = squareService.today(viewer.getId(), 40);
         var sameOccupant = again.occupants().stream()
-                .filter(entry -> entry.post().getId().equals(post.getId()))
+                .filter(entry -> entry.presence().getUserId().equals(author.getId()))
                 .findFirst()
                 .orElseThrow();
 
@@ -337,10 +349,7 @@ class GenerationFlowIntegrationTest {
         CreditService.Allowance beforePublish = creditService.allowance(author.getId());
 
         // The user compares and keeps the ORIGINAL character.
-        postService.publish(
-                author.getId(),
-                first.getId(),
-                new PixelPostService.PublishCommand(null, null, List.of(), false));
+        characterService.keep(author.getId(), first.getId(), true, true, null);
 
         // The AI did its job, so the attempt is paid for either way. Refunding
         // on "I preferred the first one" would make retrying free in practice.

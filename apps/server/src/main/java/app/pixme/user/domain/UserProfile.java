@@ -40,15 +40,6 @@ public class UserProfile {
     @Column(name = "bio", length = 60)
     private String bio;
 
-    /**
-     * The post whose character represents this user across the app. Kept
-     * denormalised because it is read on nearly every screen (feed header,
-     * chat list, square nameplate) and would otherwise require a subquery
-     * against the whole post history every time.
-     */
-    @Column(name = "representative_post_id")
-    private UUID representativePostId;
-
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 

@@ -12,7 +12,7 @@ import app.pixme.common.RateLimiter;
 import app.pixme.common.TextSanitizer;
 import app.pixme.config.PixmeProperties;
 import app.pixme.connection.ConnectionService;
-import app.pixme.pixel.repository.PixelPostRepository;
+import app.pixme.dailystatus.repository.DailyStatusRepository;
 import app.pixme.safety.domain.Block;
 import app.pixme.safety.domain.Report;
 import app.pixme.safety.domain.ReportReason;
@@ -63,7 +63,7 @@ public class SafetyService {
     private final BlockRepository blockRepository;
     private final ReportRepository reportRepository;
     private final UserRepository userRepository;
-    private final PixelPostRepository postRepository;
+    private final DailyStatusRepository statusRepository;
     private final MessageRepository messageRepository;
     private final ConnectionService connectionService;
     private final TextSanitizer sanitizer;
@@ -74,7 +74,7 @@ public class SafetyService {
             BlockRepository blockRepository,
             ReportRepository reportRepository,
             UserRepository userRepository,
-            PixelPostRepository postRepository,
+            DailyStatusRepository statusRepository,
             MessageRepository messageRepository,
             ConnectionService connectionService,
             TextSanitizer sanitizer,
@@ -83,7 +83,7 @@ public class SafetyService {
         this.blockRepository = blockRepository;
         this.reportRepository = reportRepository;
         this.userRepository = userRepository;
-        this.postRepository = postRepository;
+        this.statusRepository = statusRepository;
         this.messageRepository = messageRepository;
         this.connectionService = connectionService;
         this.sanitizer = sanitizer;
@@ -225,9 +225,9 @@ public class SafetyService {
                     .findActiveById(command.targetId())
                     .map(User::getId)
                     .orElseThrow(() -> ApiException.notFound("사용자"));
-            case PIXEL_POST -> postRepository
-                    .findAlive(command.targetId())
-                    .map(post -> post.getUserId())
+            case DAILY_STATUS -> statusRepository
+                    .findById(command.targetId())
+                    .map(status -> status.getUserId())
                     .orElse(null);
             case MESSAGE -> messageRepository
                     .findById(command.targetId())

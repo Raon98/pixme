@@ -100,8 +100,9 @@ export function usePushRegistration() {
     })();
   }, [sessionState]);
 
-  /* Tap handling → deep link. */
+  /* Tap handling → deep link. Web has no system notification tray. */
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     const subscription = Notifications.addNotificationResponseReceivedListener(
       (response) => {
         const deepLink = response.notification.request.content.data
@@ -117,6 +118,7 @@ export function usePushRegistration() {
 
   /* Foreground receipt → refresh the badge so tabs stay in sync. */
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     const subscription = Notifications.addNotificationReceivedListener(() => {
       void queryClient.invalidateQueries({
         queryKey: qk.notifications.badge(),

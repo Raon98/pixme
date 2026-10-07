@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import app.pixme.api.dto.DailyStatusDtos;
 import app.pixme.api.dto.EntitlementsResponse;
 import app.pixme.api.dto.MeResponse;
 import app.pixme.api.dto.PixelDtos;
@@ -15,11 +16,14 @@ import app.pixme.api.dto.SocialDtos;
 import app.pixme.api.dto.UserDtos;
 import app.pixme.chat.domain.Message;
 import app.pixme.connection.ConnectionService;
+import app.pixme.dailystatus.DailyStatusService;
+import app.pixme.dailystatus.domain.DailyStatus;
 import app.pixme.notification.domain.Notification;
+import app.pixme.pixel.domain.PixelCharacter;
 import app.pixme.pixel.domain.PixelGeneration;
-import app.pixme.pixel.domain.PixelPost;
-import app.pixme.pixel.repository.PixelPostRepository;
-import app.pixme.pixel.repository.PixelPostTagRepository;
+import app.pixme.pixel.domain.UserCurrentPixel;
+import app.pixme.pixel.repository.PixelCharacterRepository;
+import app.pixme.pixel.repository.UserCurrentPixelRepository;
 import app.pixme.reaction.repository.ReactionRepository;
 import app.pixme.safety.repository.BlockRepository;
 import app.pixme.storage.StorageService;
@@ -37,21 +41,24 @@ import org.springframework.transaction.annotation.Transactional;
  * Entity → DTO mapping.
  *
  * <p>Centralised for two reasons. First, batching: a feed page needs author
- * profiles, representative characters, tags and the viewer's hearts, and doing
- * that per card is the classic N+1 that makes an image feed feel slow — the
- * {@code posts(...)} method resolves all of it in a fixed number of queries.
+ * profiles, current characters, tags and the viewer's hearts, and doing that
+ * per card is the classic N+1 that makes an image feed feel slow — the
+ * {@code statuses(...)} method resolves all of it in a fixed number of
+ * queries.
  *
  * <p>Second, and more important: this is the one place where the private
- * original photo could leak into a response. {@link #post} never populates it;
- * only {@link #myPost}, which is reachable only from owner-scoped endpoints,
- * does. Keeping that decision in a single file makes it reviewable.
+ * original photo could leak into a response. No {@code DailyStatus} or
+ * {@code PixelCharacter} mapping here ever populates an original URL — that is
+ * reachable only through {@code PixelCharacterService#originalUrl}'s dedicated,
+ * owner-only endpoint.
  */
 @Component
 public class ResponseAssembler {
 
     private final UserProfileRepository profileRepository;
-    private final PixelPostRepository postRepository;
-    private final PixelPostTagRepository tagRepository;
+    private final PixelCharacterRepository characterRepository;
+    private final UserCurrentPixelRepository currentPixelRepository;
+    private final DailyStatusService dailyStatusService;
     private final ReactionRepository reactionRepository;
     private final BlockRepository blockRepository;
     private final StorageService storage;
@@ -61,8 +68,9 @@ public class ResponseAssembler {
 
     public ResponseAssembler(
             UserProfileRepository profileRepository,
-            PixelPostRepository postRepository,
-            PixelPostTagRepository tagRepository,
+            PixelCharacterRepository characterRepository,
+            UserCurrentPixelRepository currentPixelRepository,
+            DailyStatusService dailyStatusService,
             ReactionRepository reactionRepository,
             BlockRepository blockRepository,
             StorageService storage,
@@ -70,8 +78,9 @@ public class ResponseAssembler {
             StoreService storeService,
             UserService userService) {
         this.profileRepository = profileRepository;
-        this.postRepository = postRepository;
-        this.tagRepository = tagRepository;
+        this.characterRepository = characterRepository;
+        this.currentPixelRepository = currentPixelRepository;
+        this.dailyStatusService = dailyStatusService;
         this.reactionRepository = reactionRepository;
         this.blockRepository = blockRepository;
         this.storage = storage;
@@ -99,7 +108,7 @@ public class ResponseAssembler {
                 user.getStatus().name(),
                 userService.isProfileCompleted(userId),
                 userService.interestsOf(userId),
-                representativeUrl(profile),
+                representativeUrl(userId),
                 new MeResponse.StatsResponse(
                         stats.getReceivedHeartCount(),
                         stats.getConnectionCount(),
@@ -129,32 +138,35 @@ public class ResponseAssembler {
                 List.copyOf(entitlements.unlockedDecorations()));
     }
 
-    /* -------------------------------------------------------------- posts */
+    /* ----------------------------------------------------- daily statuses */
 
-    /** Batched mapping for a feed page, a grid, or a curation rail. */
+    /** Batched mapping for a feed page, a history grid, or a curation rail. */
     @Transactional(readOnly = true)
-    public List<PixelDtos.PostResponse> posts(UUID viewerId, List<PixelPost> posts) {
-        if (posts.isEmpty()) {
+    public List<DailyStatusDtos.StatusResponse> statuses(UUID viewerId, List<DailyStatus> statuses) {
+        if (statuses.isEmpty()) {
             return List.of();
         }
 
-        List<UUID> postIds = posts.stream().map(PixelPost::getId).toList();
-        List<UUID> authorIds = posts.stream().map(PixelPost::getUserId).distinct().toList();
+        List<UUID> statusIds = statuses.stream().map(DailyStatus::getId).toList();
+        List<UUID> authorIds = statuses.stream().map(DailyStatus::getUserId).distinct().toList();
+        List<UUID> characterIds =
+                statuses.stream().map(DailyStatus::getPixelCharacterId).distinct().toList();
 
         Map<UUID, UserProfile> profiles = new HashMap<>();
         profileRepository.findByUserIdIn(authorIds)
                 .forEach(profile -> profiles.put(profile.getUserId(), profile));
 
-        Map<UUID, List<String>> tags = new HashMap<>();
-        for (Object[] row : tagRepository.findTagsByPostIds(postIds)) {
-            tags.computeIfAbsent((UUID) row[0], key -> new ArrayList<>()).add((String) row[1]);
-        }
+        Map<UUID, PixelCharacter> charactersById = new HashMap<>();
+        characterRepository.findAllById(characterIds)
+                .forEach(character -> charactersById.put(character.getId(), character));
+
+        Map<UUID, List<String>> tags = dailyStatusService.tagsOf(statusIds);
 
         Set<UUID> hearted =
-                new HashSet<>(reactionRepository.findHeartedPostIds(viewerId, postIds));
+                new HashSet<>(reactionRepository.findHeartedDailyStatusIds(viewerId, statusIds));
 
         // Representative characters for author avatars, resolved in one pass.
-        Map<UUID, String> representativeUrls = resolveRepresentativeUrls(profiles.values());
+        Map<UUID, String> representativeUrls = resolveRepresentativeUrls(authorIds);
 
         Map<UUID, String> relations = new HashMap<>();
         for (UUID authorId : authorIds) {
@@ -165,102 +177,54 @@ public class ResponseAssembler {
                             : connectionService.relationStatus(viewerId, authorId).name());
         }
 
-        List<PixelDtos.PostResponse> responses = new ArrayList<>(posts.size());
-        for (PixelPost post : posts) {
-            UserProfile profile = profiles.get(post.getUserId());
-            responses.add(new PixelDtos.PostResponse(
-                    post.getId().toString(),
+        List<DailyStatusDtos.StatusResponse> responses = new ArrayList<>(statuses.size());
+        for (DailyStatus status : statuses) {
+            UserProfile profile = profiles.get(status.getUserId());
+            PixelCharacter character = charactersById.get(status.getPixelCharacterId());
+            responses.add(new DailyStatusDtos.StatusResponse(
+                    status.getId().toString(),
                     new PixelDtos.AuthorResponse(
-                            post.getUserId().toString(),
+                            status.getUserId().toString(),
                             nicknameOf(profile),
-                            representativeUrls.get(post.getUserId()),
-                            relations.get(post.getUserId())),
-                    storage.characterUrl(post.getCharacterObjectKey()),
-                    post.getCaption(),
-                    post.getMood(),
-                    tags.getOrDefault(post.getId(), List.of()),
-                    post.getStyle().name(),
-                    post.getVisibility().name(),
-                    post.getHeartCount(),
-                    hearted.contains(post.getId()),
-                    post.getPostDate().toString(),
-                    post.isRepresentative(),
-                    post.getCreatedAt()));
+                            representativeUrls.get(status.getUserId()),
+                            relations.get(status.getUserId())),
+                    character == null ? null : storage.characterUrl(character.getCharacterObjectKey()),
+                    status.getMood(),
+                    status.getMessage(),
+                    tags.getOrDefault(status.getId(), List.of()),
+                    status.getHeartCount(),
+                    hearted.contains(status.getId()),
+                    status.isFreshCharacter(),
+                    status.getStatusDate().toString(),
+                    status.getCreatedAt()));
         }
         return responses;
     }
 
     @Transactional(readOnly = true)
-    public PixelDtos.PostResponse post(UUID viewerId, PixelPost post) {
-        return posts(viewerId, List.of(post)).get(0);
+    public DailyStatusDtos.StatusResponse status(UUID viewerId, DailyStatus status) {
+        return statuses(viewerId, List.of(status)).get(0);
     }
 
-    /**
-     * Owner-only mapping.
-     *
-     * <p>{@code originalImageUrl} is intentionally left null even here — the
-     * signed URL is issued only by the dedicated
-     * {@code GET /pixels/{id}/original} endpoint, so a list response can never
-     * carry a working link to someone's photograph. This DTO only reports
-     * <em>whether</em> an original still exists.
-     */
-    @Transactional(readOnly = true)
-    public PixelDtos.MyPostResponse myPost(UUID viewerId, PixelPost post) {
-        PixelDtos.PostResponse base = post(viewerId, post);
-        return new PixelDtos.MyPostResponse(
-                base.id(),
-                base.author(),
-                base.characterImageUrl(),
-                base.caption(),
-                base.mood(),
-                base.tags(),
-                base.style(),
-                base.visibility(),
-                base.heartCount(),
-                base.heartedByMe(),
-                base.postDate(),
-                base.isRepresentative(),
-                base.createdAt(),
-                null,
-                post.hasOriginal());
-    }
-
-    @Transactional(readOnly = true)
-    public List<PixelDtos.MyPostResponse> myPosts(UUID viewerId, List<PixelPost> posts) {
-        List<PixelDtos.PostResponse> base = posts(viewerId, posts);
-        List<PixelDtos.MyPostResponse> responses = new ArrayList<>(base.size());
-        for (int index = 0; index < base.size(); index++) {
-            PixelDtos.PostResponse current = base.get(index);
-            PixelPost entity = posts.get(index);
-            responses.add(new PixelDtos.MyPostResponse(
-                    current.id(),
-                    current.author(),
-                    current.characterImageUrl(),
-                    current.caption(),
-                    current.mood(),
-                    current.tags(),
-                    current.style(),
-                    current.visibility(),
-                    current.heartCount(),
-                    current.heartedByMe(),
-                    current.postDate(),
-                    current.isRepresentative(),
-                    current.createdAt(),
-                    null,
-                    entity.hasOriginal()));
+    public List<DailyStatusDtos.StatusSummaryResponse> statusSummaries(List<DailyStatus> statuses) {
+        if (statuses.isEmpty()) {
+            return List.of();
         }
-        return responses;
-    }
+        List<UUID> characterIds =
+                statuses.stream().map(DailyStatus::getPixelCharacterId).distinct().toList();
+        Map<UUID, PixelCharacter> charactersById = new HashMap<>();
+        characterRepository.findAllById(characterIds)
+                .forEach(character -> charactersById.put(character.getId(), character));
 
-    public List<PixelDtos.PostSummaryResponse> summaries(List<PixelPost> posts) {
-        List<PixelDtos.PostSummaryResponse> responses = new ArrayList<>(posts.size());
-        for (PixelPost post : posts) {
-            responses.add(new PixelDtos.PostSummaryResponse(
-                    post.getId().toString(),
-                    storage.characterUrl(post.getCharacterObjectKey()),
-                    post.getPostDate().toString(),
-                    post.getMood(),
-                    post.getHeartCount()));
+        List<DailyStatusDtos.StatusSummaryResponse> responses = new ArrayList<>(statuses.size());
+        for (DailyStatus status : statuses) {
+            PixelCharacter character = charactersById.get(status.getPixelCharacterId());
+            responses.add(new DailyStatusDtos.StatusSummaryResponse(
+                    status.getId().toString(),
+                    character == null ? null : storage.characterUrl(character.getCharacterObjectKey()),
+                    status.getStatusDate().toString(),
+                    status.getMood(),
+                    status.getHeartCount()));
         }
         return responses;
     }
@@ -287,14 +251,36 @@ public class ResponseAssembler {
                 generation.getCompletedAt());
     }
 
+    /* ---------------------------------------------------------- character */
+
+    public PixelDtos.CharacterResponse character(PixelCharacter character, UUID currentCharacterId) {
+        return new PixelDtos.CharacterResponse(
+                character.getId().toString(),
+                storage.characterUrl(character.getCharacterObjectKey()),
+                character.getStyle().name(),
+                character.getLabel(),
+                character.getId().equals(currentCharacterId),
+                character.hasOriginal(),
+                character.getCreatedAt());
+    }
+
+    public List<PixelDtos.CharacterResponse> characters(
+            List<PixelCharacter> characters, UUID currentCharacterId) {
+        List<PixelDtos.CharacterResponse> responses = new ArrayList<>(characters.size());
+        for (PixelCharacter character : characters) {
+            responses.add(character(character, currentCharacterId));
+        }
+        return responses;
+    }
+
     /* ------------------------------------------------------------ profile */
 
     @Transactional(readOnly = true)
     public UserDtos.PublicProfileResponse publicProfile(
             UUID viewerId,
             User target,
-            PixelPost todayPost,
-            List<PixelPost> recentPosts,
+            DailyStatus todayStatus,
+            List<DailyStatus> recentStatuses,
             UUID conversationId) {
 
         UUID targetId = target.getId();
@@ -305,9 +291,9 @@ public class ResponseAssembler {
                 .findBlockedAmong(viewerId, List.of(targetId))
                 .contains(targetId);
 
-        boolean heartedToday = todayPost != null
+        boolean heartedToday = todayStatus != null
                 && !reactionRepository
-                        .findHeartedPostIds(viewerId, List.of(todayPost.getId()))
+                        .findHeartedDailyStatusIds(viewerId, List.of(todayStatus.getId()))
                         .isEmpty();
 
         return new UserDtos.PublicProfileResponse(
@@ -315,9 +301,9 @@ public class ResponseAssembler {
                 nicknameOf(profile),
                 profile.getBio(),
                 userService.interestsOf(targetId),
-                representativeUrl(profile),
-                todayPost == null ? null : post(viewerId, todayPost),
-                summaries(recentPosts),
+                representativeUrl(targetId),
+                todayStatus == null ? null : status(viewerId, todayStatus),
+                statusSummaries(recentStatuses),
                 new UserDtos.PublicProfileResponse.PublicStats(
                         stats.getReceivedHeartCount(), stats.getPixelCount()),
                 new UserDtos.RelationResponse(
@@ -334,7 +320,7 @@ public class ResponseAssembler {
         return new PixelDtos.AuthorResponse(
                 userId.toString(),
                 nicknameOf(profile),
-                representativeUrl(profile),
+                representativeUrl(userId),
                 userId.equals(viewerId)
                         ? ConnectionService.RelationStatus.NONE.name()
                         : connectionService.relationStatus(viewerId, userId).name());
@@ -378,35 +364,31 @@ public class ResponseAssembler {
         return profile.getNickname();
     }
 
-    private String representativeUrl(UserProfile profile) {
-        if (profile == null || profile.getRepresentativePostId() == null) {
-            return null;
-        }
-        return postRepository
-                .findAlive(profile.getRepresentativePostId())
-                .map(post -> storage.characterUrl(post.getCharacterObjectKey()))
+    private String representativeUrl(UUID userId) {
+        return currentPixelRepository
+                .findByUserId(userId)
+                .map(UserCurrentPixel::getPixelCharacterId)
+                .flatMap(characterRepository::findAlive)
+                .map(character -> storage.characterUrl(character.getCharacterObjectKey()))
                 .orElse(null);
     }
 
-    private Map<UUID, String> resolveRepresentativeUrls(
-            java.util.Collection<UserProfile> profiles) {
-        List<UUID> representativeIds = profiles.stream()
-                .map(UserProfile::getRepresentativePostId)
-                .filter(java.util.Objects::nonNull)
-                .toList();
+    private Map<UUID, String> resolveRepresentativeUrls(List<UUID> userIds) {
+        Map<UUID, UUID> currentCharacterIds = new HashMap<>();
+        for (Object[] row : currentPixelRepository.findCharacterIdsByUserIds(userIds)) {
+            currentCharacterIds.put((UUID) row[0], (UUID) row[1]);
+        }
 
-        Map<UUID, String> byPostId = new HashMap<>();
-        if (!representativeIds.isEmpty()) {
-            postRepository.findByIdIn(representativeIds).forEach(post -> byPostId.put(
-                    post.getId(), storage.characterUrl(post.getCharacterObjectKey())));
+        Map<UUID, String> byCharacterId = new HashMap<>();
+        if (!currentCharacterIds.isEmpty()) {
+            characterRepository.findAllById(currentCharacterIds.values())
+                    .forEach(character -> byCharacterId.put(
+                            character.getId(), storage.characterUrl(character.getCharacterObjectKey())));
         }
 
         Map<UUID, String> byUserId = new HashMap<>();
-        for (UserProfile profile : profiles) {
-            if (profile.getRepresentativePostId() != null) {
-                byUserId.put(
-                        profile.getUserId(), byPostId.get(profile.getRepresentativePostId()));
-            }
+        for (Map.Entry<UUID, UUID> entry : currentCharacterIds.entrySet()) {
+            byUserId.put(entry.getKey(), byCharacterId.get(entry.getValue()));
         }
         return byUserId;
     }

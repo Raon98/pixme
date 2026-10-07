@@ -14,24 +14,26 @@ import org.springframework.data.repository.query.Param;
 
 public interface ReactionRepository extends JpaRepository<Reaction, UUID> {
 
-    Optional<Reaction> findByFromUserIdAndPostIdAndType(
-            UUID fromUserId, UUID postId, ReactionType type);
+    Optional<Reaction> findByFromUserIdAndDailyStatusIdAndType(
+            UUID fromUserId, UUID dailyStatusId, ReactionType type);
 
-    boolean existsByFromUserIdAndPostIdAndType(
-            UUID fromUserId, UUID postId, ReactionType type);
+    boolean existsByFromUserIdAndDailyStatusIdAndType(
+            UUID fromUserId, UUID dailyStatusId, ReactionType type);
 
     /**
-     * Which of these posts the viewer has already hearted. One query for a
-     * whole feed page, so rendering N cards doesn't cost N round trips.
+     * Which of these DailyStatus entries the viewer has already hearted. One
+     * query for a whole feed page, so rendering N cards doesn't cost N round
+     * trips.
      */
     @Query("""
-            select r.postId from Reaction r
-            where r.fromUserId = :viewerId and r.postId in :postIds
+            select r.dailyStatusId from Reaction r
+            where r.fromUserId = :viewerId and r.dailyStatusId in :dailyStatusIds
             """)
-    List<UUID> findHeartedPostIds(
-            @Param("viewerId") UUID viewerId, @Param("postIds") Collection<UUID> postIds);
+    List<UUID> findHeartedDailyStatusIds(
+            @Param("viewerId") UUID viewerId, @Param("dailyStatusIds") Collection<UUID> dailyStatusIds);
 
-    void deleteByFromUserIdAndPostIdAndType(UUID fromUserId, UUID postId, ReactionType type);
+    void deleteByFromUserIdAndDailyStatusIdAndType(
+            UUID fromUserId, UUID dailyStatusId, ReactionType type);
 
     /**
      * Inserts a heart, doing nothing if one already exists.
@@ -47,23 +49,23 @@ public interface ReactionRepository extends JpaRepository<Reaction, UUID> {
     @Modifying
     @Query(
             value = """
-                    insert into reactions (id, from_user_id, post_id, type, created_at)
-                    values (:id, :fromUserId, :postId, 'HEART', now())
-                    on conflict (from_user_id, post_id, type) do nothing
+                    insert into reactions (id, from_user_id, daily_status_id, type, created_at)
+                    values (:id, :fromUserId, :dailyStatusId, 'HEART', now())
+                    on conflict (from_user_id, daily_status_id, type) do nothing
                     """,
             nativeQuery = true)
     int insertHeartIfAbsent(
             @Param("id") UUID id,
             @Param("fromUserId") UUID fromUserId,
-            @Param("postId") UUID postId);
+            @Param("dailyStatusId") UUID dailyStatusId);
 
-    long countByPostId(UUID postId);
+    long countByDailyStatusId(UUID dailyStatusId);
 
-    /** Everyone who hearted a post, newest first — used for notification grouping. */
+    /** Everyone who hearted an entry, newest first — used for notification grouping. */
     @Query("""
             select r.fromUserId from Reaction r
-            where r.postId = :postId
+            where r.dailyStatusId = :dailyStatusId
             order by r.createdAt desc
             """)
-    List<UUID> findRecentReactorIds(@Param("postId") UUID postId);
+    List<UUID> findRecentReactorIds(@Param("dailyStatusId") UUID dailyStatusId);
 }

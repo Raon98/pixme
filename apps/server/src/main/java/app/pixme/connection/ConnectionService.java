@@ -86,7 +86,7 @@ public class ConnectionService {
     /* ------------------------------------------------------------ request */
 
     @Transactional
-    public RequestResult request(UUID fromUserId, UUID toUserId, UUID sourcePostId) {
+    public RequestResult request(UUID fromUserId, UUID toUserId, UUID sourceDailyStatusId) {
         if (fromUserId.equals(toUserId)) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "자신에게는 보낼 수 없어요.");
         }
@@ -123,7 +123,7 @@ public class ConnectionService {
         if (theirs.isPresent() && theirs.get().isPending()) {
             ConnectionRequest incoming = theirs.get();
             ConnectionRequest outgoing = mine.orElseGet(
-                    () -> ConnectionRequest.create(fromUserId, toUserId, sourcePostId));
+                    () -> ConnectionRequest.create(fromUserId, toUserId, sourceDailyStatusId));
 
             incoming.setStatus(ConnectionRequestStatus.CONNECTED);
             outgoing.setStatus(ConnectionRequestStatus.CONNECTED);
@@ -149,10 +149,10 @@ public class ConnectionService {
 
         ConnectionRequest request = mine.map(existing -> {
                     existing.setStatus(ConnectionRequestStatus.REQUESTED);
-                    existing.setSourcePostId(sourcePostId);
+                    existing.setSourceDailyStatusId(sourceDailyStatusId);
                     return existing;
                 })
-                .orElseGet(() -> ConnectionRequest.create(fromUserId, toUserId, sourcePostId));
+                .orElseGet(() -> ConnectionRequest.create(fromUserId, toUserId, sourceDailyStatusId));
         requestRepository.save(request);
 
         notifier.onConnectionRequested(fromUserId, toUserId);

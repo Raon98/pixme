@@ -217,7 +217,8 @@ public class UserService {
             Boolean pushConnected,
             Boolean pushMessage,
             Boolean pushDailyReminder,
-            Boolean keepOriginalPhoto) {}
+            Boolean keepOriginalPhoto,
+            Boolean squareVisible) {}
 
     /**
      * Partial profile update, used by both first-run setup and later editing.
@@ -331,7 +332,6 @@ public class UserService {
         profileRepository.findById(userId).ifPresent(profile -> {
             profile.setNickname(null);
             profile.setBio(null);
-            profile.setRepresentativePostId(null);
             profileRepository.save(profile);
         });
 
@@ -410,6 +410,10 @@ public class UserService {
         }
         if (patch.keepOriginalPhoto() != null) {
             settings.setKeepOriginalPhoto(patch.keepOriginalPhoto());
+        }
+        if (patch.squareVisible() != null) {
+            settings.setSquareVisible(patch.squareVisible());
+            settings.setSquareOnboarded(true);
         }
         settingsRepository.save(settings);
     }

@@ -1,7 +1,6 @@
 package app.pixme.api.dto;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 
 import jakarta.validation.constraints.NotBlank;
@@ -47,13 +46,25 @@ public final class PixelDtos {
             Instant createdAt,
             Instant completedAt) {}
 
-    /* -------------------------------------------------------------- post */
+    /**
+     * Confirms a generation result as an owned PixelCharacter — the only
+     * moment one is added to the Collection. {@code asCurrent} points
+     * {@code UserCurrentPixel} at it and, if there is a {@code DailyStatus}
+     * row for today, marks it fresh; declining to set it current still keeps
+     * the character in the Collection for later, free, re-selection.
+     */
+    public record KeepGenerationRequest(boolean asCurrent, boolean keepOriginal, String label) {}
 
-    public record PublishRequest(
-            @Size(max = 60) String caption,
-            String mood,
-            List<String> tags,
-            boolean replaceRepresentative) {}
+    /* ---------------------------------------------------------- character */
+
+    public record CharacterResponse(
+            String id,
+            String characterImageUrl,
+            String style,
+            String label,
+            boolean isCurrent,
+            boolean hasOriginal,
+            Instant createdAt) {}
 
     public record AuthorResponse(
             String id,
@@ -61,54 +72,5 @@ public final class PixelDtos {
             String representativeCharacterUrl,
             String connectionStatus) {}
 
-    public record PostResponse(
-            String id,
-            AuthorResponse author,
-            String characterImageUrl,
-            String caption,
-            String mood,
-            List<String> tags,
-            String style,
-            String visibility,
-            int heartCount,
-            boolean heartedByMe,
-            String postDate,
-            boolean isRepresentative,
-            Instant createdAt) {}
-
-    /** Owner-only view; the only place `originalImageUrl` is ever populated. */
-    public record MyPostResponse(
-            String id,
-            AuthorResponse author,
-            String characterImageUrl,
-            String caption,
-            String mood,
-            List<String> tags,
-            String style,
-            String visibility,
-            int heartCount,
-            boolean heartedByMe,
-            String postDate,
-            boolean isRepresentative,
-            Instant createdAt,
-            String originalImageUrl,
-            boolean originalRetained) {}
-
-    public record PostSummaryResponse(
-            String id, String characterImageUrl, String postDate, String mood, int heartCount) {}
-
-    public record TodayStatusResponse(
-            PostResponse myTodayPost,
-            boolean firstGenerationAvailable,
-            boolean firstRetryAvailable,
-            int bonusFreeCredits,
-            int creditBalance,
-            boolean nextGenerationIsFree,
-            String pendingGenerationId) {}
-
     public record SignedUrlResponse(String url, Instant expiresAt) {}
-
-    /* ---------------------------------------------------------- reaction */
-
-    public record HeartResponse(String postId, int heartCount, boolean heartedByMe) {}
 }

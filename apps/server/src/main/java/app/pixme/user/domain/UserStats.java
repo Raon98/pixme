@@ -9,7 +9,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
-import jakarta.persistence.Version;
 
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -20,8 +19,15 @@ import lombok.Setter;
  *
  * <p>Maintained in the same transaction as the event that changes them. Counts
  * here are display values, not accounting records — the authoritative history
- * is {@code reactions}, {@code connections} and {@code pixel_posts}, so a
- * reconciliation job can always rebuild this table.
+ * is {@code reactions}, {@code connections}, {@code daily_status} and
+ * {@code pixel_characters}, so a reconciliation job can always rebuild this
+ * table.
+ *
+ * <p>{@code pixelCount} and the streak measure two deliberately different
+ * things: the Collection's size (how many characters the user has ever kept —
+ * tied to paid generation) versus daily engagement (free, and the thing a
+ * streak should reward so it never pressures anyone to pay to keep a streak
+ * alive).
  */
 @Entity
 @Table(name = "user_stats")
@@ -40,15 +46,16 @@ public class UserStats {
     @Column(name = "connection_count", nullable = false)
     private int connectionCount;
 
+    /** Size of the PixelCharacter Collection. */
     @Column(name = "pixel_count", nullable = false)
     private int pixelCount;
 
-    /** Consecutive days with a published representative PIXME. */
+    /** Consecutive days with a {@code DailyStatus} row — free daily engagement. */
     @Column(name = "streak_days", nullable = false)
     private int streakDays;
 
-    @Column(name = "last_post_date")
-    private LocalDate lastPostDate;
+    @Column(name = "last_status_date")
+    private LocalDate lastStatusDate;
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
@@ -73,21 +80,24 @@ public class UserStats {
         this.connectionCount = Math.max(0, this.connectionCount + delta);
     }
 
+    /** A new PixelCharacter was kept — always paid, never day-gated. */
+    public void incrementPixelCount() {
+        this.pixelCount += 1;
+    }
+
     /**
-     * Records a published PIXME and maintains the streak.
+     * Records today's free activity and maintains the streak.
      *
-     * <p>Publishing twice on the same day must not extend the streak, and a
-     * replaced representative post on the same day must not double-count — both
-     * are handled by comparing against {@code lastPostDate}.
+     * <p>Touching status twice in the same day must not double-count, and a
+     * gap of more than one day resets the streak rather than continuing it.
      */
-    public void recordPost(LocalDate postDate) {
-        if (lastPostDate != null && !postDate.isAfter(lastPostDate)) {
+    public void recordStatus(LocalDate statusDate) {
+        if (lastStatusDate != null && !statusDate.isAfter(lastStatusDate)) {
             return;
         }
-        this.streakDays = (lastPostDate != null && postDate.minusDays(1).equals(lastPostDate))
+        this.streakDays = (lastStatusDate != null && statusDate.minusDays(1).equals(lastStatusDate))
                 ? this.streakDays + 1
                 : 1;
-        this.lastPostDate = postDate;
-        this.pixelCount += 1;
+        this.lastStatusDate = statusDate;
     }
 }

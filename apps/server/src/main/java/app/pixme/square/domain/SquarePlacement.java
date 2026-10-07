@@ -16,12 +16,17 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * Where one character stands in today's square.
+ * Where one person stands in today's square.
  *
  * <p>Persisted rather than computed per request so the square is <em>stable</em>:
  * pulling to refresh must not teleport everyone to new spots. It also means
  * every client sees the same arrangement, which is what makes it feel like a
  * shared place rather than a randomised list.
+ *
+ * <p>Keyed by {@code (presenceDate, userId)} — one person, one spot per day —
+ * rather than by a post, since standing in the square no longer requires
+ * having generated anything today. What renders there is always the user's
+ * live {@code UserCurrentPixel}, resolved at read time.
  */
 @Entity
 @Table(name = "square_placements")
@@ -31,9 +36,6 @@ public class SquarePlacement {
 
     @EmbeddedId
     private Key key;
-
-    @Column(name = "user_id", nullable = false)
-    private UUID userId;
 
     @Column(name = "x", nullable = false)
     private int x;
@@ -52,10 +54,8 @@ public class SquarePlacement {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
-    public SquarePlacement(
-            LocalDate postDate, UUID postId, UUID userId, int x, int y, short depth, short idleVariant) {
-        this.key = new Key(postDate, postId);
-        this.userId = userId;
+    public SquarePlacement(LocalDate presenceDate, UUID userId, int x, int y, short depth, short idleVariant) {
+        this.key = new Key(presenceDate, userId);
         this.x = x;
         this.y = y;
         this.depth = depth;
@@ -63,12 +63,12 @@ public class SquarePlacement {
         this.createdAt = Instant.now();
     }
 
-    public UUID getPostId() {
-        return key.getPostId();
+    public UUID getUserId() {
+        return key.getUserId();
     }
 
-    public LocalDate getPostDate() {
-        return key.getPostDate();
+    public LocalDate getPresenceDate() {
+        return key.getPresenceDate();
     }
 
     @Embeddable
@@ -76,15 +76,15 @@ public class SquarePlacement {
     @NoArgsConstructor
     public static class Key implements Serializable {
 
-        @Column(name = "post_date", nullable = false)
-        private LocalDate postDate;
+        @Column(name = "presence_date", nullable = false)
+        private LocalDate presenceDate;
 
-        @Column(name = "post_id", nullable = false)
-        private UUID postId;
+        @Column(name = "user_id", nullable = false)
+        private UUID userId;
 
-        public Key(LocalDate postDate, UUID postId) {
-            this.postDate = postDate;
-            this.postId = postId;
+        public Key(LocalDate presenceDate, UUID userId) {
+            this.presenceDate = presenceDate;
+            this.userId = userId;
         }
 
         @Override
@@ -95,12 +95,12 @@ public class SquarePlacement {
             if (!(other instanceof Key key)) {
                 return false;
             }
-            return Objects.equals(postDate, key.postDate) && Objects.equals(postId, key.postId);
+            return Objects.equals(presenceDate, key.presenceDate) && Objects.equals(userId, key.userId);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(postDate, postId);
+            return Objects.hash(presenceDate, userId);
         }
     }
 }

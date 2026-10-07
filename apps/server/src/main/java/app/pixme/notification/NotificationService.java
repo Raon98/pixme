@@ -22,8 +22,12 @@ import app.pixme.notification.repository.NotificationRepository;
 import app.pixme.notification.repository.PushTokenRepository;
 import app.pixme.pixel.GenerationNotifier;
 import app.pixme.pixel.domain.GenerationFailureReason;
-import app.pixme.pixel.domain.PixelPost;
-import app.pixme.pixel.repository.PixelPostRepository;
+import app.pixme.dailystatus.domain.DailyStatus;
+import app.pixme.dailystatus.repository.DailyStatusRepository;
+import app.pixme.pixel.domain.PixelCharacter;
+import app.pixme.pixel.domain.UserCurrentPixel;
+import app.pixme.pixel.repository.PixelCharacterRepository;
+import app.pixme.pixel.repository.UserCurrentPixelRepository;
 import app.pixme.reaction.ReactionNotifier;
 import app.pixme.reaction.repository.ReactionRepository;
 import app.pixme.user.domain.UserProfile;
@@ -67,7 +71,9 @@ public class NotificationService
     private final PushTokenRepository pushTokenRepository;
     private final UserProfileRepository profileRepository;
     private final UserSettingsRepository settingsRepository;
-    private final PixelPostRepository postRepository;
+    private final DailyStatusRepository statusRepository;
+    private final PixelCharacterRepository characterRepository;
+    private final UserCurrentPixelRepository currentPixelRepository;
     private final ReactionRepository reactionRepository;
     private final PushSender pushSender;
     private final Executor executor;
@@ -77,7 +83,9 @@ public class NotificationService
             PushTokenRepository pushTokenRepository,
             UserProfileRepository profileRepository,
             UserSettingsRepository settingsRepository,
-            PixelPostRepository postRepository,
+            DailyStatusRepository statusRepository,
+            PixelCharacterRepository characterRepository,
+            UserCurrentPixelRepository currentPixelRepository,
             ReactionRepository reactionRepository,
             PushSender pushSender,
             @Qualifier(AsyncConfig.NOTIFICATION_EXECUTOR) Executor executor) {
@@ -85,7 +93,9 @@ public class NotificationService
         this.pushTokenRepository = pushTokenRepository;
         this.profileRepository = profileRepository;
         this.settingsRepository = settingsRepository;
-        this.postRepository = postRepository;
+        this.statusRepository = statusRepository;
+        this.characterRepository = characterRepository;
+        this.currentPixelRepository = currentPixelRepository;
         this.reactionRepository = reactionRepository;
         this.pushSender = pushSender;
         this.executor = executor;
@@ -95,22 +105,24 @@ public class NotificationService
 
     @Override
     @Transactional
-    public void onHeartReceived(UUID authorId, UUID fromUserId, UUID postId) {
+    public void onHeartReceived(UUID authorId, UUID fromUserId, UUID dailyStatusId) {
         if (!settingOf(authorId).map(UserSettings::isPushHeart).orElse(true)) {
             return;
         }
 
-        String groupKey = "HEART:" + postId;
-        long heartCount = reactionRepository.countByPostId(postId);
+        String groupKey = "HEART:" + dailyStatusId;
+        long heartCount = reactionRepository.countByDailyStatusId(dailyStatusId);
 
         String title = "♡ 하트를 받았어요";
         String body = heartCount <= 1
                 ? "누군가 오늘의 PIXME에 하트를 보냈어요."
                 : "%d명이 오늘의 PIXME에 하트를 보냈어요.".formatted(heartCount);
 
-        String imageKey = postRepository
-                .findAlive(postId)
-                .map(PixelPost::getCharacterObjectKey)
+        String imageKey = statusRepository
+                .findById(dailyStatusId)
+                .map(DailyStatus::getPixelCharacterId)
+                .flatMap(characterRepository::findAlive)
+                .map(PixelCharacter::getCharacterObjectKey)
                 .orElse(null);
 
         Notification notification = notificationRepository
@@ -125,7 +137,7 @@ public class NotificationService
                         title,
                         body,
                         imageKey,
-                        "/pixel/" + postId,
+                        "/today/" + dailyStatusId,
                         groupKey));
 
         notificationRepository.save(notification);
@@ -133,7 +145,7 @@ public class NotificationService
         // Only push on the first heart of a group. Subsequent hearts update the
         // in-app row silently — the user doesn't need a buzz per heart.
         if (heartCount <= 1) {
-            push(authorId, title, body, "/pixel/" + postId, false, "default");
+            push(authorId, title, body, "/today/" + dailyStatusId, false, "default");
         }
     }
 
@@ -321,8 +333,8 @@ public class NotificationService
      * worth surfacing, capped to once per post.
      */
     @Transactional
-    public void sendReactionSpike(UUID userId, UUID postId, long heartCount) {
-        String groupKey = "SPIKE:" + postId;
+    public void sendReactionSpike(UUID userId, UUID dailyStatusId, long heartCount) {
+        String groupKey = "SPIKE:" + dailyStatusId;
         if (notificationRepository.findByUserIdAndGroupKey(userId, groupKey).isPresent()) {
             return;
         }
@@ -335,11 +347,16 @@ public class NotificationService
                 NotificationType.REACTION_SPIKE,
                 title,
                 body,
-                postRepository.findAlive(postId).map(PixelPost::getCharacterObjectKey).orElse(null),
-                "/pixel/" + postId,
+                statusRepository
+                        .findById(dailyStatusId)
+                        .map(DailyStatus::getPixelCharacterId)
+                        .flatMap(characterRepository::findAlive)
+                        .map(PixelCharacter::getCharacterObjectKey)
+                        .orElse(null),
+                "/today/" + dailyStatusId,
                 groupKey));
 
-        push(userId, title, body, "/pixel/" + postId, false, "default");
+        push(userId, title, body, "/today/" + dailyStatusId, false, "default");
     }
 
     /* ----------------------------------------------------------- read side */
@@ -466,11 +483,11 @@ public class NotificationService
     }
 
     private String representativeKeyOf(UUID userId) {
-        return profileRepository
-                .findById(userId)
-                .map(UserProfile::getRepresentativePostId)
-                .flatMap(postRepository::findAlive)
-                .map(PixelPost::getCharacterObjectKey)
+        return currentPixelRepository
+                .findByUserId(userId)
+                .map(UserCurrentPixel::getPixelCharacterId)
+                .flatMap(characterRepository::findAlive)
+                .map(PixelCharacter::getCharacterObjectKey)
                 .orElse(null);
     }
 }

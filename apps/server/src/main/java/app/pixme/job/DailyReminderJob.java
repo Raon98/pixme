@@ -6,7 +6,7 @@ import java.util.UUID;
 
 import app.pixme.common.ServiceClock;
 import app.pixme.notification.NotificationService;
-import app.pixme.pixel.repository.PixelPostRepository;
+import app.pixme.dailystatus.repository.DailyStatusRepository;
 import app.pixme.user.domain.UserStatus;
 import app.pixme.user.repository.UserRepository;
 import org.slf4j.Logger;
@@ -33,17 +33,17 @@ public class DailyReminderJob {
     private static final int ACTIVE_WITHIN_DAYS = 14;
 
     private final UserRepository userRepository;
-    private final PixelPostRepository postRepository;
+    private final DailyStatusRepository statusRepository;
     private final NotificationService notificationService;
     private final ServiceClock clock;
 
     public DailyReminderJob(
             UserRepository userRepository,
-            PixelPostRepository postRepository,
+            DailyStatusRepository statusRepository,
             NotificationService notificationService,
             ServiceClock clock) {
         this.userRepository = userRepository;
-        this.postRepository = postRepository;
+        this.statusRepository = statusRepository;
         this.notificationService = notificationService;
         this.clock = clock;
     }
@@ -58,7 +58,7 @@ public class DailyReminderJob {
 
         int sent = 0;
         for (UUID userId : candidates) {
-            if (postRepository.findRepresentative(userId, today).isPresent()) {
+            if (statusRepository.findByUserIdAndStatusDate(userId, today).isPresent()) {
                 continue;
             }
             try {

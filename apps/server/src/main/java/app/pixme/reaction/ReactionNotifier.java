@@ -12,5 +12,5 @@ import java.util.UUID;
  */
 public interface ReactionNotifier {
 
-    void onHeartReceived(UUID authorId, UUID fromUserId, UUID postId);
+    void onHeartReceived(UUID authorId, UUID fromUserId, UUID dailyStatusId);
 }

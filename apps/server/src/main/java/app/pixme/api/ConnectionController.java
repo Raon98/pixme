@@ -40,10 +40,10 @@ public class ConnectionController {
     public SocialDtos.ConnectResponse connect(
             @CurrentUser AuthPrincipal principal,
             @PathVariable UUID userId,
-            @RequestParam(required = false) UUID sourcePostId) {
+            @RequestParam(required = false) UUID sourceDailyStatusId) {
 
         ConnectionService.RequestResult result =
-                connectionService.request(principal.userId(), userId, sourcePostId);
+                connectionService.request(principal.userId(), userId, sourceDailyStatusId);
 
         return new SocialDtos.ConnectResponse(
                 result.status().name(),

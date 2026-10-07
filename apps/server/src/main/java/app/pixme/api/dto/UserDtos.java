@@ -30,7 +30,8 @@ public final class UserDtos {
             Boolean pushConnected,
             Boolean pushMessage,
             Boolean pushDailyReminder,
-            Boolean keepOriginalPhoto) {}
+            Boolean keepOriginalPhoto,
+            Boolean squareVisible) {}
 
     public record NicknameAvailabilityResponse(boolean available, String reason) {}
 
@@ -52,8 +53,8 @@ public final class UserDtos {
             String bio,
             List<String> interests,
             String representativeCharacterUrl,
-            PixelDtos.PostResponse todayPost,
-            List<PixelDtos.PostSummaryResponse> recentPosts,
+            DailyStatusDtos.StatusResponse todayStatus,
+            List<DailyStatusDtos.StatusSummaryResponse> recentStatuses,
             PublicStats stats,
             RelationResponse relation) {
 
@@ -64,6 +65,6 @@ public final class UserDtos {
             boolean isMe,
             String connectionStatus,
             String conversationId,
-            boolean heartedTodayPost,
+            boolean heartedTodayStatus,
             boolean blockedByMe) {}
 }

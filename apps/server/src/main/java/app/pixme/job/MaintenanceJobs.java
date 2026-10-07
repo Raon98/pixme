@@ -8,9 +8,9 @@ import app.pixme.common.ServiceClock;
 import app.pixme.config.PixmeProperties;
 import app.pixme.feed.FeedExposureRepository;
 import app.pixme.pixel.GenerationService;
-import app.pixme.pixel.domain.PixelPost;
+import app.pixme.pixel.domain.PixelCharacter;
 import app.pixme.pixel.domain.PixelUpload;
-import app.pixme.pixel.repository.PixelPostRepository;
+import app.pixme.pixel.repository.PixelCharacterRepository;
 import app.pixme.pixel.repository.PixelUploadRepository;
 import app.pixme.square.SquareService;
 import app.pixme.storage.StorageService;
@@ -47,7 +47,7 @@ public class MaintenanceJobs {
 
     private final GenerationService generationService;
     private final PixelUploadRepository uploadRepository;
-    private final PixelPostRepository postRepository;
+    private final PixelCharacterRepository characterRepository;
     private final FeedExposureRepository exposureRepository;
     private final SquareService squareService;
     private final StoreService storeService;
@@ -59,7 +59,7 @@ public class MaintenanceJobs {
     public MaintenanceJobs(
             GenerationService generationService,
             PixelUploadRepository uploadRepository,
-            PixelPostRepository postRepository,
+            PixelCharacterRepository characterRepository,
             FeedExposureRepository exposureRepository,
             SquareService squareService,
             StoreService storeService,
@@ -69,7 +69,7 @@ public class MaintenanceJobs {
             PixmeProperties properties) {
         this.generationService = generationService;
         this.uploadRepository = uploadRepository;
-        this.postRepository = postRepository;
+        this.characterRepository = characterRepository;
         this.exposureRepository = exposureRepository;
         this.squareService = squareService;
         this.storeService = storeService;
@@ -118,12 +118,12 @@ public class MaintenanceJobs {
     @Transactional
     public void purgeExpiredOriginals() {
         Instant threshold = Instant.now().minus(properties.privacy().originalRetention());
-        List<PixelPost> expired = postRepository.findWithExpiredOriginals(threshold);
+        List<PixelCharacter> expired = characterRepository.findWithExpiredOriginals(threshold);
 
-        for (PixelPost post : expired) {
-            storage.deleteOriginal(post.getOriginalObjectKey());
-            post.forgetOriginal();
-            postRepository.save(post);
+        for (PixelCharacter character : expired) {
+            storage.deleteOriginal(character.getOriginalObjectKey());
+            character.forgetOriginal();
+            characterRepository.save(character);
         }
         if (!expired.isEmpty()) {
             log.info("purged {} original photo(s) past retention", expired.size());

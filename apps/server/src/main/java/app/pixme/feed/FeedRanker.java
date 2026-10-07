@@ -10,7 +10,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import app.pixme.config.PixmeProperties;
-import app.pixme.pixel.domain.PixelPost;
+import app.pixme.dailystatus.domain.DailyStatus;
 import org.springframework.stereotype.Component;
 
 /**
@@ -57,43 +57,43 @@ public class FeedRanker {
             int viewerInterestCount,
             /** Author id → times already shown to this viewer today. */
             Map<UUID, Long> authorExposureCounts,
-            Set<UUID> seenPostIds,
-            Set<UUID> heartedPostIds,
+            Set<UUID> seenStatusIds,
+            Set<UUID> heartedStatusIds,
             Set<UUID> connectedUserIds,
             /** Authors whose account is younger than a week. */
             Set<UUID> newUserIds) {}
 
-    public List<PixelPost> rank(List<PixelPost> candidates, Context context) {
+    public List<DailyStatus> rank(List<DailyStatus> candidates, Context context) {
         int exposureCap = properties.feed().maxExposuresPerAuthorPerDay();
 
         Map<UUID, Double> scores = new HashMap<>();
-        for (PixelPost post : candidates) {
-            scores.put(post.getId(), score(post, context, exposureCap));
+        for (DailyStatus status : candidates) {
+            scores.put(status.getId(), score(status, context, exposureCap));
         }
 
         return candidates.stream()
-                .sorted(Comparator.comparingDouble((PixelPost post) -> -scores.get(post.getId())))
+                .sorted(Comparator.comparingDouble((DailyStatus status) -> -scores.get(status.getId())))
                 .toList();
     }
 
-    private double score(PixelPost post, Context context, int exposureCap) {
+    private double score(DailyStatus status, Context context, int exposureCap) {
         double score = 0;
 
         /* --- recency: full marks within the hour, decaying over the day --- */
-        Instant published = post.getPublishedAt() == null ? post.getCreatedAt() : post.getPublishedAt();
+        Instant published = status.getUpdatedAt() == null ? status.getCreatedAt() : status.getUpdatedAt();
         long minutesOld = Duration.between(published, context.now()).toMinutes();
         score += 40.0 * Math.exp(-Math.max(0, minutesOld) / 420.0);
 
         /* --- interest overlap: bounded, so it nudges rather than filters --- */
-        int shared = context.sharedInterestCounts().getOrDefault(post.getUserId(), 0);
+        int shared = context.sharedInterestCounts().getOrDefault(status.getUserId(), 0);
         if (context.viewerInterestCount() > 0 && shared > 0) {
             double ratio = (double) shared / context.viewerInterestCount();
             score += 18.0 * Math.min(1.0, ratio);
         }
 
-        /* --- reaction rate, with a floor so a brand-new post isn't punished -- */
-        int views = Math.max(post.getViewCount(), 1);
-        double reactionRate = (double) post.getHeartCount() / views;
+        /* --- reaction rate, with a floor so a brand-new status isn't punished */
+        int views = Math.max(status.getViewCount(), 1);
+        double reactionRate = (double) status.getHeartCount() / views;
         score += 20.0 * Math.min(1.0, reactionRate * 4);
 
         /*
@@ -102,23 +102,33 @@ public class FeedRanker {
          * signal that entrenches already-popular accounts, so it may inform
          * the order but must never decide it.
          */
-        score += 4.0 * Math.log1p(post.getHeartCount()) / Math.log1p(50);
+        score += 4.0 * Math.log1p(status.getHeartCount()) / Math.log1p(50);
 
         /* --- new-user boost: the cold-start fix -------------------------- */
-        if (context.newUserIds().contains(post.getUserId())) {
+        if (context.newUserIds().contains(status.getUserId())) {
             score += 22.0;
         }
 
         /* --- already connected: keep them visible, but don't dominate ---- */
-        if (context.connectedUserIds().contains(post.getUserId())) {
+        if (context.connectedUserIds().contains(status.getUserId())) {
             score += 8.0;
         }
 
+        /*
+         * "Fresh look" bonus — a small nudge for someone who picked a new
+         * Current PIXME today, never a requirement to appear at all. Setting
+         * only a mood/message/tag still surfaces you with zero bonus; this
+         * must stay a bonus, not a gate.
+         */
+        if (status.isFreshCharacter()) {
+            score += 6.0;
+        }
+
         /* --- exposure penalties ------------------------------------------ */
-        if (context.seenPostIds().contains(post.getId())) {
+        if (context.seenStatusIds().contains(status.getId())) {
             score -= 60.0;
         }
-        long authorShown = context.authorExposureCounts().getOrDefault(post.getUserId(), 0L);
+        long authorShown = context.authorExposureCounts().getOrDefault(status.getUserId(), 0L);
         if (authorShown >= exposureCap) {
             score -= 45.0;
         } else if (authorShown > 0) {
@@ -126,7 +136,7 @@ public class FeedRanker {
         }
 
         /* --- already hearted: they've reacted, show someone else --------- */
-        if (context.heartedPostIds().contains(post.getId())) {
+        if (context.heartedStatusIds().contains(status.getId())) {
             score -= 25.0;
         }
 
@@ -134,9 +144,10 @@ public class FeedRanker {
          * Stable jitter. Kept small on purpose: it exists to break ties between
          * near-equal candidates so two similar users don't get identical
          * feeds. Weighted any higher it starts overriding the real signals —
-         * a post with a 10x better reaction rate must not lose to a coin flip.
+         * a status with a 10x better reaction rate must not lose to a coin
+         * flip.
          */
-        score += jitter(context.viewerId(), post.getId()) * 2.0;
+        score += jitter(context.viewerId(), status.getId()) * 2.0;
 
         return score;
     }
@@ -146,10 +157,10 @@ public class FeedRanker {
      * random value here would reshuffle the feed under the user's thumb on
      * every page fetch.
      */
-    private double jitter(UUID viewerId, UUID postId) {
+    private double jitter(UUID viewerId, UUID statusId) {
         long mixed = viewerId.getLeastSignificantBits() * 31L
-                + postId.getMostSignificantBits() * 17L
-                + postId.getLeastSignificantBits();
+                + statusId.getMostSignificantBits() * 17L
+                + statusId.getLeastSignificantBits();
         // Knuth multiplicative hash, then take the top bits.
         long hashed = mixed * 0x9E3779B97F4A7C15L;
         return ((hashed >>> 11) & 0x1FFFFFFFFFFFFFL) / (double) (1L << 53);
@@ -163,8 +174,8 @@ public class FeedRanker {
      * exactly the failure mode that makes a social app feel dead to the people
      * who just arrived.
      */
-    public List<PixelPost> applyNewUserQuota(
-            List<PixelPost> ranked, Set<UUID> newUserIds, int limit) {
+    public List<DailyStatus> applyNewUserQuota(
+            List<DailyStatus> ranked, Set<UUID> newUserIds, int limit) {
         double quota = properties.feed().newUserQuota();
         if (quota <= 0 || ranked.isEmpty()) {
             return ranked.stream().limit(limit).toList();
@@ -175,8 +186,8 @@ public class FeedRanker {
             return ranked.stream().limit(limit).toList();
         }
 
-        List<PixelPost> newcomers = ranked.stream()
-                .filter(post -> newUserIds.contains(post.getUserId()))
+        List<DailyStatus> newcomers = ranked.stream()
+                .filter(status -> newUserIds.contains(status.getUserId()))
                 .limit(reserved)
                 .toList();
 
@@ -184,13 +195,13 @@ public class FeedRanker {
             return ranked.stream().limit(limit).toList();
         }
 
-        List<PixelPost> rest = ranked.stream()
-                .filter(post -> !newcomers.contains(post))
+        List<DailyStatus> rest = ranked.stream()
+                .filter(status -> !newcomers.contains(status))
                 .toList();
 
         // Spread the reserved slots through the page rather than clustering
         // them at the top, where they would read as a "new users" section.
-        java.util.List<PixelPost> result = new java.util.ArrayList<>(limit);
+        java.util.List<DailyStatus> result = new java.util.ArrayList<>(limit);
         int stride = Math.max(2, limit / (newcomers.size() + 1));
         int newcomerIndex = 0;
         int restIndex = 0;

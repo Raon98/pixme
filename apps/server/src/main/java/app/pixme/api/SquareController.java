@@ -1,5 +1,7 @@
 package app.pixme.api;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -7,10 +9,11 @@ import java.util.Map;
 import java.util.UUID;
 
 import app.pixme.api.dto.SquareDtos;
-import app.pixme.pixel.domain.PixelPost;
+import app.pixme.dailystatus.domain.DailyStatus;
 import app.pixme.security.AuthPrincipal;
 import app.pixme.security.CurrentUser;
 import app.pixme.square.SquareService;
+import app.pixme.square.domain.SquarePresence;
 import app.pixme.square.domain.SquareScene;
 import app.pixme.storage.StorageService;
 import app.pixme.user.domain.UserProfile;
@@ -29,6 +32,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class SquareController {
 
     private static final Logger log = LoggerFactory.getLogger(SquareController.class);
+
+    /** Presence younger than this reads as "✨ 방금 도착했어요" rather than "🟢 지금 있어요". */
+    private static final Duration JUST_ARRIVED_WINDOW = Duration.ofMinutes(5);
+
+    /** Presence last touched within this window still reads as "🟢 지금 있어요". */
+    private static final Duration ACTIVE_WINDOW = Duration.ofMinutes(30);
 
     private final SquareService squareService;
     private final UserProfileRepository profileRepository;
@@ -51,12 +60,13 @@ public class SquareController {
             @CurrentUser AuthPrincipal principal,
             @RequestParam(required = false) Integer limit) {
 
+        squareService.recordPresenceIfVisible(principal.userId());
         SquareService.SquareView view = squareService.today(principal.userId(), limit);
 
         List<UUID> userIds = new ArrayList<>();
-        view.occupants().forEach(occupant -> userIds.add(occupant.post().getUserId()));
+        view.occupants().forEach(occupant -> userIds.add(occupant.presence().getUserId()));
         view.curations().forEach(curation ->
-                curation.posts().forEach(post -> userIds.add(post.getUserId())));
+                curation.occupants().forEach(occupant -> userIds.add(occupant.presence().getUserId())));
 
         Map<UUID, String> nicknames = new HashMap<>();
         if (!userIds.isEmpty()) {
@@ -67,30 +77,21 @@ public class SquareController {
 
         List<SquareDtos.OccupantResponse> occupants = new ArrayList<>(view.occupants().size());
         for (SquareService.Occupant occupant : view.occupants()) {
-            PixelPost post = occupant.post();
-            occupants.add(new SquareDtos.OccupantResponse(
-                    post.getId().toString(),
-                    post.getUserId().toString(),
-                    nicknames.getOrDefault(post.getUserId(), "알 수 없음"),
-                    storage.characterUrl(post.getCharacterObjectKey()),
-                    post.getMood(),
-                    occupant.placement().getX(),
-                    occupant.placement().getY(),
-                    occupant.placement().getIdleVariant(),
-                    occupant.placement().getDepth()));
+            occupants.add(toOccupantResponse(occupant, nicknames));
         }
 
         List<SquareDtos.CurationResponse> curations = new ArrayList<>(view.curations().size());
         for (SquareService.Curation curation : view.curations()) {
             List<SquareDtos.CurationEntryResponse> entries =
-                    new ArrayList<>(curation.posts().size());
-            for (PixelPost post : curation.posts()) {
+                    new ArrayList<>(curation.occupants().size());
+            for (SquareService.Occupant occupant : curation.occupants()) {
+                DailyStatus status = occupant.status();
                 entries.add(new SquareDtos.CurationEntryResponse(
-                        post.getId().toString(),
-                        post.getUserId().toString(),
-                        nicknames.getOrDefault(post.getUserId(), "알 수 없음"),
-                        storage.characterUrl(post.getCharacterObjectKey()),
-                        post.getMood()));
+                        occupant.presence().getUserId().toString(),
+                        status == null ? null : status.getId().toString(),
+                        nicknames.getOrDefault(occupant.presence().getUserId(), "알 수 없음"),
+                        storage.characterUrl(occupant.character().getCharacterObjectKey()),
+                        status == null ? null : status.getMood()));
             }
             curations.add(new SquareDtos.CurationResponse(
                     curation.code().name(), curation.title(), entries));
@@ -98,6 +99,34 @@ public class SquareController {
 
         return new SquareDtos.SquareResponse(
                 scene(view.scene()), occupants, curations, view.totalCount(), null);
+    }
+
+    private SquareDtos.OccupantResponse toOccupantResponse(
+            SquareService.Occupant occupant, Map<UUID, String> nicknames) {
+        DailyStatus status = occupant.status();
+        return new SquareDtos.OccupantResponse(
+                occupant.presence().getUserId().toString(),
+                status == null ? null : status.getId().toString(),
+                nicknames.getOrDefault(occupant.presence().getUserId(), "알 수 없음"),
+                storage.characterUrl(occupant.character().getCharacterObjectKey()),
+                status == null ? null : status.getMood(),
+                status == null ? null : status.getMessage(),
+                presenceState(occupant.presence()),
+                occupant.placement().getX(),
+                occupant.placement().getY(),
+                occupant.placement().getIdleVariant(),
+                occupant.placement().getDepth());
+    }
+
+    private String presenceState(SquarePresence presence) {
+        Instant now = Instant.now();
+        if (Duration.between(presence.getEnteredAt(), now).compareTo(JUST_ARRIVED_WINDOW) <= 0) {
+            return "JUST_ARRIVED";
+        }
+        if (Duration.between(presence.getLastActiveAt(), now).compareTo(ACTIVE_WINDOW) <= 0) {
+            return "ACTIVE";
+        }
+        return "VISITED";
     }
 
     private SquareDtos.SceneResponse scene(SquareScene scene) {

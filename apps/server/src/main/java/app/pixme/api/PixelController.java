@@ -1,7 +1,5 @@
 package app.pixme.api;
 
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -9,17 +7,13 @@ import java.util.UUID;
 import app.pixme.ai.PixelStyle;
 import app.pixme.api.dto.PixelDtos;
 import app.pixme.common.ApiException;
-import app.pixme.common.CursorPage;
-import app.pixme.common.Cursors;
 import app.pixme.common.ErrorCode;
-import app.pixme.feed.FeedService;
 import app.pixme.pixel.GenerationService;
-import app.pixme.pixel.PixelPostService;
+import app.pixme.pixel.PixelCharacterService;
+import app.pixme.pixel.domain.PixelCharacter;
 import app.pixme.pixel.domain.PixelGeneration;
-import app.pixme.pixel.domain.PixelPost;
 import app.pixme.security.AuthPrincipal;
 import app.pixme.security.CurrentUser;
-import app.pixme.store.CreditService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -28,36 +22,30 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The create flow and PIXME reads.
+ * The create flow and the PIXME Collection.
  *
- * <p>Route order matters here: {@code /pixels/today} and
- * {@code /pixels/today-status} are declared before {@code /pixels/{postId}} so
- * the literal paths are not swallowed by the UUID path variable.
+ * <p>Deliberately has no feed or "today" reads any more — those live on
+ * {@code DailyStatusController}, because appearing on Today/광장 is gated on
+ * having a {@code DailyStatus} row, not on anything here. This controller is
+ * purely: turn a photo into a candidate, then decide whether to keep it.
  */
 @RestController
 @RequestMapping("/api/v1/pixels")
 public class PixelController {
 
     private final GenerationService generationService;
-    private final PixelPostService postService;
-    private final FeedService feedService;
-    private final CreditService creditService;
+    private final PixelCharacterService characterService;
     private final ResponseAssembler assembler;
 
     public PixelController(
             GenerationService generationService,
-            PixelPostService postService,
-            FeedService feedService,
-            CreditService creditService,
+            PixelCharacterService characterService,
             ResponseAssembler assembler) {
         this.generationService = generationService;
-        this.postService = postService;
-        this.feedService = feedService;
-        this.creditService = creditService;
+        this.characterService = characterService;
         this.assembler = assembler;
     }
 
@@ -124,103 +112,48 @@ public class PixelController {
                 .toList();
     }
 
-    /* ------------------------------------------------------------ publish */
-
-    @PostMapping("/{generationId}/publish")
-    public PixelDtos.PostResponse publish(
+    /**
+     * Confirms a candidate as an owned character — the one moment a generation
+     * becomes part of the Collection. The AI call was already paid for
+     * regardless of this call's outcome.
+     */
+    @PostMapping("/generations/{generationId}/keep")
+    public PixelDtos.CharacterResponse keep(
             @CurrentUser AuthPrincipal principal,
             @PathVariable UUID generationId,
-            @Valid @RequestBody PixelDtos.PublishRequest request) {
+            @Valid @RequestBody PixelDtos.KeepGenerationRequest request) {
 
-        PixelPost post = postService.publish(
-                principal.userId(),
-                generationId,
-                new PixelPostService.PublishCommand(
-                        request.caption(),
-                        request.mood(),
-                        request.tags() == null ? List.of() : request.tags(),
-                        request.replaceRepresentative()));
-
-        return assembler.post(principal.userId(), post);
+        PixelCharacter character = characterService.keep(
+                principal.userId(), generationId, request.asCurrent(), request.keepOriginal(), request.label());
+        return assembler.character(character, characterService.currentCharacterId(principal.userId()));
     }
 
-    /* --------------------------------------------------------------- feed */
+    /* -------------------------------------------------------- collection */
 
-    @GetMapping("/today")
-    public CursorPage<PixelDtos.PostResponse> todayFeed(
-            @CurrentUser AuthPrincipal principal,
-            @RequestParam(required = false) String cursor,
-            @RequestParam(required = false) Integer limit) {
-
-        FeedService.FeedPage page = feedService.today(principal.userId(), cursor, limit);
-        return CursorPage.of(
-                assembler.posts(principal.userId(), page.posts()), page.nextCursor());
+    @GetMapping("/characters")
+    public List<PixelDtos.CharacterResponse> collection(@CurrentUser AuthPrincipal principal) {
+        UUID currentId = characterService.currentCharacterId(principal.userId());
+        return assembler.characters(characterService.collection(principal.userId()), currentId);
     }
 
-    @GetMapping("/today-status")
-    public PixelDtos.TodayStatusResponse todayStatus(@CurrentUser AuthPrincipal principal) {
-        PixelPost todayPost = postService.findTodayRepresentative(principal.userId()).orElse(null);
-        CreditService.Allowance allowance = creditService.allowance(principal.userId());
-        String pendingGenerationId = generationService
-                .latestUnpublishedCandidate(principal.userId())
-                .map(generation -> generation.getId().toString())
-                .orElse(null);
-
-        return new PixelDtos.TodayStatusResponse(
-                todayPost == null ? null : assembler.post(principal.userId(), todayPost),
-                allowance.firstGenerationAvailable(),
-                allowance.firstRetryAvailable(),
-                allowance.bonusFreeCredits(),
-                allowance.creditBalance(),
-                allowance.nextGenerationIsFree(),
-                pendingGenerationId);
+    /** Free — never calls a provider. See {@link PixelCharacterService#setCurrent}. */
+    @PostMapping("/characters/{characterId}/set-current")
+    public PixelDtos.CharacterResponse setCurrent(
+            @CurrentUser AuthPrincipal principal, @PathVariable UUID characterId) {
+        characterService.setCurrent(principal.userId(), characterId);
+        PixelCharacter character = characterService.collection(principal.userId()).stream()
+                .filter(candidate -> candidate.getId().equals(characterId))
+                .findFirst()
+                .orElseThrow(() -> ApiException.notFound("PIXME"));
+        return assembler.character(character, characterId);
     }
 
-    /* ------------------------------------------------------------ history */
-
-    @GetMapping("/me")
-    public CursorPage<PixelDtos.MyPostResponse> myPixels(
-            @CurrentUser AuthPrincipal principal,
-            @RequestParam(required = false) String cursor,
-            @RequestParam(defaultValue = "30") int limit) {
-
-        int capped = Math.min(Math.max(limit, 1), 60);
-        Cursors.Keyset keyset = Cursors.decode(cursor);
-
-        List<PixelPost> posts = postService.history(
-                principal.userId(),
-                keyset == null ? null : LocalDate.ofInstant(keyset.timestamp(), ZoneOffset.UTC),
-                keyset == null ? null : keyset.id(),
-                capped + 1);
-
-        boolean hasMore = posts.size() > capped;
-        List<PixelPost> page = hasMore ? posts.subList(0, capped) : posts;
-
-        String nextCursor = hasMore && !page.isEmpty()
-                ? Cursors.encodeDate(
-                        page.get(page.size() - 1).getPostDate(), page.get(page.size() - 1).getId())
-                : null;
-
-        return CursorPage.of(assembler.myPosts(principal.userId(), page), nextCursor);
+    @DeleteMapping("/characters/{characterId}")
+    public ResponseEntity<Void> deleteCharacter(
+            @CurrentUser AuthPrincipal principal, @PathVariable UUID characterId) {
+        characterService.delete(principal.userId(), characterId);
+        return ResponseEntity.noContent().build();
     }
-
-    @GetMapping("/me/{postId}")
-    public PixelDtos.MyPostResponse myPixel(
-            @CurrentUser AuthPrincipal principal, @PathVariable UUID postId) {
-        return assembler.myPost(
-                principal.userId(), postService.getOwned(principal.userId(), postId));
-    }
-
-    /* ------------------------------------------------------------- detail */
-
-    @GetMapping("/{postId}")
-    public PixelDtos.PostResponse detail(
-            @CurrentUser AuthPrincipal principal, @PathVariable UUID postId) {
-        return assembler.post(
-                principal.userId(), postService.getVisible(principal.userId(), postId));
-    }
-
-    /* ----------------------------------------------------------- original */
 
     /**
      * Issues a short-lived signed URL for the owner's own original photo.
@@ -229,34 +162,18 @@ public class PixelController {
      * a usable link to an original, so seeing one always requires a deliberate,
      * auditable request.
      */
-    @GetMapping("/{postId}/original")
+    @GetMapping("/characters/{characterId}/original")
     public PixelDtos.SignedUrlResponse original(
-            @CurrentUser AuthPrincipal principal, @PathVariable UUID postId) {
-        PixelPostService.SignedUrl signed =
-                postService.originalUrl(principal.userId(), postId);
+            @CurrentUser AuthPrincipal principal, @PathVariable UUID characterId) {
+        PixelCharacterService.SignedUrl signed =
+                characterService.originalUrl(principal.userId(), characterId);
         return new PixelDtos.SignedUrlResponse(signed.url(), signed.expiresAt());
     }
 
-    @DeleteMapping("/{postId}/original")
+    @DeleteMapping("/characters/{characterId}/original")
     public ResponseEntity<Void> deleteOriginal(
-            @CurrentUser AuthPrincipal principal, @PathVariable UUID postId) {
-        postService.deleteOriginal(principal.userId(), postId);
-        return ResponseEntity.noContent().build();
-    }
-
-    /* ------------------------------------------------------------- mutate */
-
-    @PostMapping("/{postId}/unpublish")
-    public PixelDtos.PostResponse unpublish(
-            @CurrentUser AuthPrincipal principal, @PathVariable UUID postId) {
-        return assembler.post(
-                principal.userId(), postService.unpublish(principal.userId(), postId));
-    }
-
-    @DeleteMapping("/{postId}")
-    public ResponseEntity<Void> delete(
-            @CurrentUser AuthPrincipal principal, @PathVariable UUID postId) {
-        postService.delete(principal.userId(), postId);
+            @CurrentUser AuthPrincipal principal, @PathVariable UUID characterId) {
+        characterService.deleteOriginal(principal.userId(), characterId);
         return ResponseEntity.noContent().build();
     }
 

@@ -47,6 +47,19 @@ public class UserSettings {
     @Column(name = "keep_original_photo", nullable = false)
     private boolean keepOriginalPhoto = true;
 
+    /**
+     * Whether being active today can place this user in the square. Off by
+     * default and only ever flipped on by an explicit choice — see
+     * {@code square_onboarded} — never silently, because standing in the
+     * square means other people can see you.
+     */
+    @Column(name = "square_visible", nullable = false)
+    private boolean squareVisible = false;
+
+    /** Whether the one-time square visibility explanation has been shown. */
+    @Column(name = "square_onboarded", nullable = false)
+    private boolean squareOnboarded = false;
+
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 

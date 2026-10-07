@@ -43,9 +43,9 @@ public class ConnectionRequest {
     @Column(name = "status", nullable = false, length = 16)
     private ConnectionRequestStatus status = ConnectionRequestStatus.REQUESTED;
 
-    /** The PIXME that prompted the wave, for "오늘의 PIXME를 계기로" context. */
-    @Column(name = "source_post_id")
-    private UUID sourcePostId;
+    /** The daily status that prompted the wave, for "오늘의 PIXME를 계기로" context. */
+    @Column(name = "source_daily_status_id")
+    private UUID sourceDailyStatusId;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
@@ -53,12 +53,12 @@ public class ConnectionRequest {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 
-    public static ConnectionRequest create(UUID fromUserId, UUID toUserId, UUID sourcePostId) {
+    public static ConnectionRequest create(UUID fromUserId, UUID toUserId, UUID sourceDailyStatusId) {
         ConnectionRequest request = new ConnectionRequest();
         request.id = UUID.randomUUID();
         request.fromUserId = fromUserId;
         request.toUserId = toUserId;
-        request.sourcePostId = sourcePostId;
+        request.sourceDailyStatusId = sourceDailyStatusId;
         request.status = ConnectionRequestStatus.REQUESTED;
         Instant now = Instant.now();
         request.createdAt = now;

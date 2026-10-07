@@ -10,19 +10,28 @@ const log = logger('push');
 /**
  * Foreground presentation. PIXME is intentionally quiet: we show banners but
  * never play a sound for hearts — only for direct messages and connections.
+ *
+ * <p>Skipped entirely on web: `expo-notifications` reaches into native-module
+ * internals at registration time that `react-native-web` doesn't shim in this
+ * Expo/React Native combination, which crashes the whole bundle at startup
+ * with "importing a module from 'react-native' instead of 'react-native-web'"
+ * — before a single component has rendered. Web has no push notifications to
+ * handle anyway.
  */
-Notifications.setNotificationHandler({
-  handleNotification: async (notification) => {
-    const type = notification.request.content.data?.type as string | undefined;
-    const loud = type === 'MESSAGE' || type === 'CONNECTED';
-    return {
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: loud,
-      shouldSetBadge: true,
-    };
-  },
-});
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async (notification) => {
+      const type = notification.request.content.data?.type as string | undefined;
+      const loud = type === 'MESSAGE' || type === 'CONNECTED';
+      return {
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: loud,
+        shouldSetBadge: true,
+      };
+    },
+  });
+}
 
 export type PushPermissionStatus = 'granted' | 'denied' | 'undetermined';
 

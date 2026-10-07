@@ -1,7 +1,6 @@
 package app.pixme.feed;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -15,8 +14,8 @@ import app.pixme.common.Cursors;
 import app.pixme.common.ServiceClock;
 import app.pixme.config.PixmeProperties;
 import app.pixme.connection.repository.ConnectionRepository;
-import app.pixme.pixel.domain.PixelPost;
-import app.pixme.pixel.repository.PixelPostRepository;
+import app.pixme.dailystatus.domain.DailyStatus;
+import app.pixme.dailystatus.repository.DailyStatusRepository;
 import app.pixme.reaction.repository.ReactionRepository;
 import app.pixme.safety.repository.BlockRepository;
 import app.pixme.user.repository.UserInterestRepository;
@@ -28,10 +27,10 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Builds the "오늘" feed.
  *
- * <p>Pagination is keyset over {@code publishedAt} within the day, and the
+ * <p>Pagination is keyset over {@code updatedAt} within the day, and the
  * ranker reorders inside that window. Doing it the other way round — ranking
  * globally and paging by rank — is what produces duplicate and skipped cards
- * as new posts arrive mid-session.
+ * as new statuses arrive mid-session.
  */
 @Service
 public class FeedService {
@@ -42,7 +41,7 @@ public class FeedService {
     /** How recently an account must have joined to count as "new". */
     private static final Duration NEW_USER_WINDOW = Duration.ofDays(7);
 
-    private final PixelPostRepository postRepository;
+    private final DailyStatusRepository statusRepository;
     private final BlockRepository blockRepository;
     private final ReactionRepository reactionRepository;
     private final ConnectionRepository connectionRepository;
@@ -54,7 +53,7 @@ public class FeedService {
     private final PixmeProperties properties;
 
     public FeedService(
-            PixelPostRepository postRepository,
+            DailyStatusRepository statusRepository,
             BlockRepository blockRepository,
             ReactionRepository reactionRepository,
             ConnectionRepository connectionRepository,
@@ -64,7 +63,7 @@ public class FeedService {
             FeedRanker ranker,
             ServiceClock clock,
             PixmeProperties properties) {
-        this.postRepository = postRepository;
+        this.statusRepository = statusRepository;
         this.blockRepository = blockRepository;
         this.reactionRepository = reactionRepository;
         this.connectionRepository = connectionRepository;
@@ -76,7 +75,7 @@ public class FeedService {
         this.properties = properties;
     }
 
-    public record FeedPage(List<PixelPost> posts, Set<UUID> heartedPostIds, String nextCursor) {}
+    public record FeedPage(List<DailyStatus> statuses, Set<UUID> heartedStatusIds, String nextCursor) {}
 
     @Transactional
     public FeedPage today(UUID viewerId, String cursor, Integer requestedLimit) {
@@ -89,7 +88,7 @@ public class FeedService {
 
         List<UUID> excluded = blockRepository.findAllRelatedUserIds(viewerId);
 
-        List<PixelPost> candidates = postRepository.findFeedCandidates(
+        List<DailyStatus> candidates = statusRepository.findFeedCandidates(
                 today,
                 viewerId,
                 excluded.isEmpty() ? List.of(viewerId) : excluded,
@@ -103,44 +102,40 @@ public class FeedService {
         }
 
         FeedRanker.Context context = buildContext(viewerId, today, candidates);
-        List<PixelPost> ranked = ranker.rank(candidates, context);
-        List<PixelPost> page = ranker.applyNewUserQuota(ranked, context.newUserIds(), limit);
+        List<DailyStatus> ranked = ranker.rank(candidates, context);
+        List<DailyStatus> page = ranker.applyNewUserQuota(ranked, context.newUserIds(), limit);
 
         recordExposures(viewerId, today, page);
 
-        // The cursor is the oldest post in the *candidate window*, not in the
+        // The cursor is the oldest status in the *candidate window*, not in the
         // ranked page — otherwise reordering would make the next page skip
-        // posts that were fetched but ranked low.
-        PixelPost oldestCandidate = candidates.get(candidates.size() - 1);
+        // statuses that were fetched but ranked low.
+        DailyStatus oldestCandidate = candidates.get(candidates.size() - 1);
         boolean windowExhausted = candidates.size() < limit * CANDIDATE_MULTIPLIER;
         String nextCursor = windowExhausted
                 ? null
-                : Cursors.encode(
-                        oldestCandidate.getPublishedAt() == null
-                                ? oldestCandidate.getCreatedAt()
-                                : oldestCandidate.getPublishedAt(),
-                        oldestCandidate.getId());
+                : Cursors.encode(oldestCandidate.getUpdatedAt(), oldestCandidate.getId());
 
-        Set<UUID> hearted = new HashSet<>(context.heartedPostIds());
+        Set<UUID> hearted = new HashSet<>(context.heartedStatusIds());
         return new FeedPage(page, hearted, nextCursor);
     }
 
-    /** Which of these posts the viewer has already hearted. */
+    /** Which of these statuses the viewer has already hearted. */
     @Transactional(readOnly = true)
-    public Set<UUID> heartedAmong(UUID viewerId, List<UUID> postIds) {
-        if (postIds.isEmpty()) {
+    public Set<UUID> heartedAmong(UUID viewerId, List<UUID> dailyStatusIds) {
+        if (dailyStatusIds.isEmpty()) {
             return Set.of();
         }
-        return new HashSet<>(reactionRepository.findHeartedPostIds(viewerId, postIds));
+        return new HashSet<>(reactionRepository.findHeartedDailyStatusIds(viewerId, dailyStatusIds));
     }
 
     /* ------------------------------------------------------------- context */
 
     private FeedRanker.Context buildContext(
-            UUID viewerId, LocalDate today, List<PixelPost> candidates) {
+            UUID viewerId, LocalDate today, List<DailyStatus> candidates) {
 
-        List<UUID> authorIds = candidates.stream().map(PixelPost::getUserId).distinct().toList();
-        List<UUID> postIds = candidates.stream().map(PixelPost::getId).toList();
+        List<UUID> authorIds = candidates.stream().map(DailyStatus::getUserId).distinct().toList();
+        List<UUID> statusIds = candidates.stream().map(DailyStatus::getId).toList();
 
         List<String> viewerInterests = userInterestRepository.findCodesByUserId(viewerId);
 
@@ -157,9 +152,9 @@ public class FeedService {
             authorExposures.put((UUID) row[0], ((Number) row[1]).longValue());
         }
 
-        Set<UUID> seen = new HashSet<>(exposureRepository.findSeenPostIds(viewerId, today));
+        Set<UUID> seen = new HashSet<>(exposureRepository.findSeenDailyStatusIds(viewerId, today));
         Set<UUID> hearted = new HashSet<>(
-                reactionRepository.findHeartedPostIds(viewerId, postIds));
+                reactionRepository.findHeartedDailyStatusIds(viewerId, statusIds));
         Set<UUID> connected = new HashSet<>(connectionRepository.findPeerIds(viewerId));
 
         Set<UUID> newUsers = new HashSet<>(userRepository.findRecentlyJoinedAmong(
@@ -178,23 +173,23 @@ public class FeedService {
     }
 
     /**
-     * Persists what we showed, and counts the impression on the post.
+     * Persists what we showed, and counts the impression on the status.
      *
      * <p>View counts are what make the ranker's reaction <em>rate</em>
      * meaningful, so they have to be written on the serving path rather than
      * inferred later from client telemetry.
      */
-    private void recordExposures(UUID viewerId, LocalDate today, List<PixelPost> page) {
+    private void recordExposures(UUID viewerId, LocalDate today, List<DailyStatus> page) {
         if (page.isEmpty()) {
             return;
         }
 
         List<FeedExposure> exposures = new ArrayList<>(page.size());
-        List<UUID> postIds = new ArrayList<>(page.size());
+        List<UUID> statusIds = new ArrayList<>(page.size());
 
-        for (PixelPost post : page) {
-            exposures.add(new FeedExposure(viewerId, post.getId(), post.getUserId(), today));
-            postIds.add(post.getId());
+        for (DailyStatus status : page) {
+            exposures.add(new FeedExposure(viewerId, status.getId(), status.getUserId(), today));
+            statusIds.add(status.getId());
         }
 
         // An exposure may already exist (the viewer re-opened the feed); the
@@ -205,6 +200,6 @@ public class FeedService {
                 exposureRepository.save(exposure);
             }
         }
-        postRepository.incrementViewCounts(postIds);
+        statusRepository.incrementViewCounts(statusIds);
     }
 }

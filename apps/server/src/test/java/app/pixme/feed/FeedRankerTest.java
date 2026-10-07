@@ -11,9 +11,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-import app.pixme.ai.PixelStyle;
 import app.pixme.config.PixmeProperties;
-import app.pixme.pixel.domain.PixelPost;
+import app.pixme.dailystatus.domain.DailyStatus;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -29,23 +28,23 @@ class FeedRankerTest {
     private final FeedRanker ranker = new FeedRanker(properties());
 
     @Test
-    @DisplayName("최근에 올라온 PIXME가 먼저 보인다")
-    void prefersRecentPosts() {
-        PixelPost fresh = post(NOW.minus(Duration.ofMinutes(5)), 0, 0);
-        PixelPost old = post(NOW.minus(Duration.ofHours(10)), 0, 0);
+    @DisplayName("최근에 올라온 상태가 먼저 보인다")
+    void prefersRecentStatuses() {
+        DailyStatus fresh = status(NOW.minus(Duration.ofMinutes(5)), 0, 0);
+        DailyStatus old = status(NOW.minus(Duration.ofHours(10)), 0, 0);
 
-        List<PixelPost> ranked = ranker.rank(List.of(old, fresh), context(Set.of(), Map.of(), Set.of()));
+        List<DailyStatus> ranked = ranker.rank(List.of(old, fresh), context(Set.of(), Map.of(), Set.of()));
 
         assertThat(ranked.get(0)).isEqualTo(fresh);
     }
 
     @Test
     @DisplayName("이미 본 카드는 뒤로 밀린다")
-    void sinksAlreadySeenPosts() {
-        PixelPost seen = post(NOW.minus(Duration.ofMinutes(1)), 20, 100);
-        PixelPost unseen = post(NOW.minus(Duration.ofHours(3)), 0, 10);
+    void sinksAlreadySeenStatuses() {
+        DailyStatus seen = status(NOW.minus(Duration.ofMinutes(1)), 20, 100);
+        DailyStatus unseen = status(NOW.minus(Duration.ofHours(3)), 0, 10);
 
-        List<PixelPost> ranked = ranker.rank(
+        List<DailyStatus> ranked = ranker.rank(
                 List.of(seen, unseen), context(Set.of(seen.getId()), Map.of(), Set.of()));
 
         assertThat(ranked.get(0)).isEqualTo(unseen);
@@ -54,10 +53,10 @@ class FeedRankerTest {
     @Test
     @DisplayName("같은 사람을 하루에 여러 번 보여주지 않는다")
     void penalisesRepeatedAuthors() {
-        PixelPost repeated = post(NOW.minus(Duration.ofMinutes(2)), 30, 100);
-        PixelPost other = post(NOW.minus(Duration.ofHours(4)), 1, 10);
+        DailyStatus repeated = status(NOW.minus(Duration.ofMinutes(2)), 30, 100);
+        DailyStatus other = status(NOW.minus(Duration.ofHours(4)), 1, 10);
 
-        List<PixelPost> ranked = ranker.rank(
+        List<DailyStatus> ranked = ranker.rank(
                 List.of(repeated, other),
                 context(Set.of(), Map.of(repeated.getUserId(), 2L), Set.of()));
 
@@ -68,10 +67,10 @@ class FeedRankerTest {
     @DisplayName("하트 '수'가 아니라 '반응률'을 본다")
     void prefersReactionRateOverRawCount() {
         // 50 hearts from 5000 views (1%) vs 5 hearts from 50 views (10%).
-        PixelPost popularButFlat = post(NOW.minus(Duration.ofHours(2)), 50, 5000);
-        PixelPost smallButLoved = post(NOW.minus(Duration.ofHours(2)), 5, 50);
+        DailyStatus popularButFlat = status(NOW.minus(Duration.ofHours(2)), 50, 5000);
+        DailyStatus smallButLoved = status(NOW.minus(Duration.ofHours(2)), 5, 50);
 
-        List<PixelPost> ranked = ranker.rank(
+        List<DailyStatus> ranked = ranker.rank(
                 List.of(popularButFlat, smallButLoved),
                 context(Set.of(), Map.of(), Set.of()));
 
@@ -81,10 +80,10 @@ class FeedRankerTest {
     @Test
     @DisplayName("신규 사용자는 하트가 없어도 피드에 올라온다")
     void boostsNewUsers() {
-        PixelPost newcomer = post(NOW.minus(Duration.ofHours(6)), 0, 0);
-        PixelPost established = post(NOW.minus(Duration.ofHours(5)), 8, 100);
+        DailyStatus newcomer = status(NOW.minus(Duration.ofHours(6)), 0, 0);
+        DailyStatus established = status(NOW.minus(Duration.ofHours(5)), 8, 100);
 
-        List<PixelPost> ranked = ranker.rank(
+        List<DailyStatus> ranked = ranker.rank(
                 List.of(established, newcomer),
                 context(Set.of(), Map.of(), Set.of(newcomer.getUserId())));
 
@@ -92,24 +91,39 @@ class FeedRankerTest {
     }
 
     @Test
+    @DisplayName("오늘 새 Current PIXME를 고른 사람은 약간의 가산점을 받지만, 상태만 남긴 사람도 노출된다")
+    void freshCharacterIsABonusNotAGate() {
+        DailyStatus freshLook = status(NOW.minus(Duration.ofHours(2)), 5, 50);
+        set(freshLook, "freshCharacter", true);
+        DailyStatus textOnly = status(NOW.minus(Duration.ofHours(2)), 5, 50);
+
+        List<DailyStatus> ranked = ranker.rank(
+                List.of(textOnly, freshLook), context(Set.of(), Map.of(), Set.of()));
+
+        // Both appear; the fresh-character one edges ahead on an otherwise tied score.
+        assertThat(ranked).containsExactlyInAnyOrder(textOnly, freshLook);
+        assertThat(ranked.get(0)).isEqualTo(freshLook);
+    }
+
+    @Test
     @DisplayName("신규 사용자 쿼터는 페이지 중간에 섞여 들어간다")
     void interleavesNewUserQuota() {
-        List<PixelPost> ranked = new java.util.ArrayList<>();
+        List<DailyStatus> ranked = new java.util.ArrayList<>();
         Set<UUID> newUserIds = new java.util.HashSet<>();
 
         for (int index = 0; index < 20; index++) {
-            PixelPost post = post(NOW.minus(Duration.ofMinutes(index)), 0, 0);
-            ranked.add(post);
+            DailyStatus entry = status(NOW.minus(Duration.ofMinutes(index)), 0, 0);
+            ranked.add(entry);
             if (index >= 15) {
-                newUserIds.add(post.getUserId());
+                newUserIds.add(entry.getUserId());
             }
         }
 
-        List<PixelPost> page = ranker.applyNewUserQuota(ranked, newUserIds, 10);
+        List<DailyStatus> page = ranker.applyNewUserQuota(ranked, newUserIds, 10);
 
         assertThat(page).hasSize(10);
         long newcomersOnPage = page.stream()
-                .filter(post -> newUserIds.contains(post.getUserId()))
+                .filter(entry -> newUserIds.contains(entry.getUserId()))
                 .count();
         // 20% of 10 slots = 2 reserved.
         assertThat(newcomersOnPage).isGreaterThanOrEqualTo(2);
@@ -118,12 +132,12 @@ class FeedRankerTest {
     }
 
     @Test
-    @DisplayName("같은 사용자·게시물 조합의 지터는 요청마다 바뀌지 않는다")
+    @DisplayName("같은 사용자·상태 조합의 지터는 요청마다 바뀌지 않는다")
     void jitterIsStableAcrossCalls() {
-        List<PixelPost> candidates = List.of(
-                post(NOW.minus(Duration.ofMinutes(10)), 2, 20),
-                post(NOW.minus(Duration.ofMinutes(10)), 2, 20),
-                post(NOW.minus(Duration.ofMinutes(10)), 2, 20));
+        List<DailyStatus> candidates = List.of(
+                status(NOW.minus(Duration.ofMinutes(10)), 2, 20),
+                status(NOW.minus(Duration.ofMinutes(10)), 2, 20),
+                status(NOW.minus(Duration.ofMinutes(10)), 2, 20));
 
         FeedRanker.Context context = context(Set.of(), Map.of(), Set.of());
 
@@ -134,33 +148,31 @@ class FeedRankerTest {
     /* ------------------------------------------------------------ fixtures */
 
     private FeedRanker.Context context(
-            Set<UUID> seenPostIds, Map<UUID, Long> authorExposures, Set<UUID> newUserIds) {
+            Set<UUID> seenStatusIds, Map<UUID, Long> authorExposures, Set<UUID> newUserIds) {
         return new FeedRanker.Context(
                 UUID.fromString("00000000-0000-0000-0000-0000000000ff"),
                 NOW,
                 Map.of(),
                 0,
                 authorExposures,
-                seenPostIds,
+                seenStatusIds,
                 Set.of(),
                 Set.of(),
                 newUserIds);
     }
 
-    private PixelPost post(Instant publishedAt, int hearts, int views) {
-        PixelPost post = new PixelPost();
-        set(post, "id", UUID.randomUUID());
-        set(post, "userId", UUID.randomUUID());
-        set(post, "generationId", UUID.randomUUID());
-        set(post, "characterObjectKey", "characters/test.png");
-        set(post, "style", PixelStyle.PIXME_BASIC);
-        set(post, "heartCount", hearts);
-        set(post, "viewCount", views);
-        set(post, "postDate", LocalDate.of(2026, 10, 7));
-        set(post, "representative", true);
-        set(post, "publishedAt", publishedAt);
-        set(post, "createdAt", publishedAt);
-        return post;
+    private DailyStatus status(Instant updatedAt, int hearts, int views) {
+        DailyStatus status = new DailyStatus();
+        set(status, "id", UUID.randomUUID());
+        set(status, "userId", UUID.randomUUID());
+        set(status, "statusDate", LocalDate.of(2026, 10, 7));
+        set(status, "pixelCharacterId", UUID.randomUUID());
+        set(status, "freshCharacter", false);
+        set(status, "heartCount", hearts);
+        set(status, "viewCount", views);
+        set(status, "createdAt", updatedAt);
+        set(status, "updatedAt", updatedAt);
+        return status;
     }
 
     /**

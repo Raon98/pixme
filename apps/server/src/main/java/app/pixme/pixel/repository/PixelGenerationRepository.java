@@ -28,18 +28,18 @@ public interface PixelGenerationRepository extends JpaRepository<PixelGeneration
 
     long countByUserIdAndPostDate(UUID userId, LocalDate postDate);
 
-    /** The newest completed-but-unpublished candidate, used to resume the flow. */
+    /** The newest completed-but-unkept candidate, used to resume the flow. */
     @Query("""
             select g from PixelGeneration g
             where g.userId = :userId
               and g.postDate = :postDate
               and g.status = 'COMPLETED'
               and not exists (
-                  select 1 from PixelPost p where p.generationId = g.id and p.deletedAt is null
+                  select 1 from PixelCharacter c where c.generationId = g.id and c.deletedAt is null
               )
             order by g.createdAt desc
             """)
-    List<PixelGeneration> findUnpublishedCandidates(
+    List<PixelGeneration> findUnkeptCandidates(
             @Param("userId") UUID userId, @Param("postDate") LocalDate postDate);
 
     /**

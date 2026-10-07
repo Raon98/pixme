@@ -4,30 +4,45 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 import app.pixme.common.ServiceClock;
 import app.pixme.config.PixmeProperties;
-import app.pixme.pixel.domain.PixelPost;
-import app.pixme.pixel.repository.PixelPostRepository;
+import app.pixme.dailystatus.domain.DailyStatus;
+import app.pixme.dailystatus.repository.DailyStatusRepository;
+import app.pixme.pixel.domain.PixelCharacter;
+import app.pixme.pixel.repository.PixelCharacterRepository;
+import app.pixme.pixel.repository.UserCurrentPixelRepository;
 import app.pixme.safety.repository.BlockRepository;
 import app.pixme.square.domain.SquarePlacement;
+import app.pixme.square.domain.SquarePresence;
 import app.pixme.square.domain.SquareScene;
 import app.pixme.square.repository.SquarePlacementRepository;
+import app.pixme.square.repository.SquarePresenceRepository;
 import app.pixme.square.repository.SquareSceneRepository;
+import app.pixme.user.domain.UserSettings;
+import app.pixme.user.domain.UserStatus;
 import app.pixme.user.repository.UserRepository;
+import app.pixme.user.repository.UserSettingsRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 오늘의 광장 — the 2D space holding everyone who published today.
+ * 오늘의 광장 — the 2D space holding everyone active today who has opted in.
+ *
+ * <p>Presence, not publishing, is the gate: a {@link SquarePresence} row only
+ * means "active today with {@code user_settings.square_visible} on" — it has
+ * nothing to do with whether the user generated anything today. What renders
+ * for each occupant is always their live {@link PixelCharacter} via
+ * {@code UserCurrentPixel}, resolved at read time, so switching Current PIXME
+ * updates the square immediately without touching presence at all.
  *
  * <p>Server-owned on purpose. Placement, scene selection and curation all
  * happen here so that:
@@ -44,35 +59,51 @@ public class SquareService {
     /** "Active now" window for the 지금 활동 중 rail. */
     private static final Duration ACTIVE_WINDOW = Duration.ofMinutes(30);
 
-    private final PixelPostRepository postRepository;
+    private final SquarePresenceRepository presenceRepository;
     private final SquarePlacementRepository placementRepository;
     private final SquareSceneRepository sceneRepository;
     private final BlockRepository blockRepository;
     private final UserRepository userRepository;
+    private final UserSettingsRepository settingsRepository;
+    private final UserCurrentPixelRepository currentPixelRepository;
+    private final PixelCharacterRepository characterRepository;
+    private final DailyStatusRepository statusRepository;
     private final SquarePlacementAllocator allocator;
     private final ServiceClock clock;
     private final PixmeProperties properties;
 
     public SquareService(
-            PixelPostRepository postRepository,
+            SquarePresenceRepository presenceRepository,
             SquarePlacementRepository placementRepository,
             SquareSceneRepository sceneRepository,
             BlockRepository blockRepository,
             UserRepository userRepository,
+            UserSettingsRepository settingsRepository,
+            UserCurrentPixelRepository currentPixelRepository,
+            PixelCharacterRepository characterRepository,
+            DailyStatusRepository statusRepository,
             SquarePlacementAllocator allocator,
             ServiceClock clock,
             PixmeProperties properties) {
-        this.postRepository = postRepository;
+        this.presenceRepository = presenceRepository;
         this.placementRepository = placementRepository;
         this.sceneRepository = sceneRepository;
         this.blockRepository = blockRepository;
         this.userRepository = userRepository;
+        this.settingsRepository = settingsRepository;
+        this.currentPixelRepository = currentPixelRepository;
+        this.characterRepository = characterRepository;
+        this.statusRepository = statusRepository;
         this.allocator = allocator;
         this.clock = clock;
         this.properties = properties;
     }
 
-    public record Occupant(PixelPost post, SquarePlacement placement) {}
+    public record Occupant(
+            SquarePresence presence,
+            PixelCharacter character,
+            DailyStatus status,
+            SquarePlacement placement) {}
 
     public enum CurationCode {
         HEARTS,
@@ -81,7 +112,7 @@ public class SquareService {
         RECURRING
     }
 
-    public record Curation(CurationCode code, String title, List<PixelPost> posts) {}
+    public record Curation(CurationCode code, String title, List<Occupant> occupants) {}
 
     public record SquareView(
             SquareScene scene, List<Occupant> occupants, List<Curation> curations, int totalCount) {}
@@ -99,14 +130,40 @@ public class SquareService {
         boolean excludedIsEmpty = excluded.isEmpty();
         List<UUID> excludedOrPlaceholder = excludedIsEmpty ? List.of(viewerId) : excluded;
 
-        List<PixelPost> posts = postRepository.findSquareOccupants(
+        List<SquarePresence> presences = presenceRepository.findOccupants(
                 today, excludedOrPlaceholder, excludedIsEmpty, PageRequest.of(0, limit));
 
-        List<Occupant> occupants = withPlacements(today, posts);
+        List<Occupant> occupants = withPlacements(today, presences);
         SquareScene scene = resolveScene();
         List<Curation> curations = buildCurations(today, excludedOrPlaceholder, excludedIsEmpty);
 
         return new SquareView(scene, occupants, curations, occupants.size());
+    }
+
+    /**
+     * Opt-in presence touch. Called from self-viewing {@code /square/today}
+     * and from every {@code DailyStatus} write — never silently from anywhere
+     * else, since standing in the square means other people can see you.
+     */
+    @Transactional
+    public void recordPresenceIfVisible(UUID userId) {
+        boolean visible = settingsRepository
+                .findById(userId)
+                .map(UserSettings::isSquareVisible)
+                .orElse(false);
+        if (!visible) {
+            return;
+        }
+
+        LocalDate today = clock.today();
+        presenceRepository
+                .findByKeyUserIdAndKeyPresenceDate(userId, today)
+                .ifPresentOrElse(
+                        presence -> {
+                            presence.touch();
+                            presenceRepository.save(presence);
+                        },
+                        () -> presenceRepository.save(new SquarePresence(userId, today)));
     }
 
     /**
@@ -124,38 +181,60 @@ public class SquareService {
                 .orElseGet(() -> scenes.isEmpty() ? null : scenes.get(scenes.size() - 1));
     }
 
-    /* ---------------------------------------------------------- placement */
+    /* ---------------------------------------------------------- resolution */
 
     /**
-     * Ensures every post has a stable coordinate, allocating for any that are
-     * new since the last read.
+     * Ensures every occupant has a stable coordinate, allocating for any that
+     * are new since the last read, and resolves each one's live Current PIXME
+     * and today's status alongside it.
      */
-    private List<Occupant> withPlacements(LocalDate today, List<PixelPost> posts) {
-        if (posts.isEmpty()) {
+    private List<Occupant> withPlacements(LocalDate today, List<SquarePresence> presences) {
+        if (presences.isEmpty()) {
             return List.of();
         }
 
-        List<UUID> postIds = posts.stream().map(PixelPost::getId).toList();
-        Map<UUID, SquarePlacement> byPost = new LinkedHashMap<>();
-        for (SquarePlacement placement : placementRepository.findForPosts(today, postIds)) {
-            byPost.put(placement.getPostId(), placement);
+        List<UUID> userIds = presences.stream().map(SquarePresence::getUserId).toList();
+
+        Map<UUID, UUID> currentCharacterIds = new HashMap<>();
+        for (Object[] row : currentPixelRepository.findCharacterIdsByUserIds(userIds)) {
+            currentCharacterIds.put((UUID) row[0], (UUID) row[1]);
         }
 
-        List<SquarePlacement> allToday = placementRepository.findByKeyPostDateOrderByYAsc(today);
-        List<SquarePlacementAllocator.Point> taken =
-                new ArrayList<>(allocator.toPoints(allToday));
+        Map<UUID, PixelCharacter> charactersById = new HashMap<>();
+        for (PixelCharacter character : characterRepository.findAllById(currentCharacterIds.values())) {
+            charactersById.put(character.getId(), character);
+        }
 
-        List<Occupant> occupants = new ArrayList<>(posts.size());
-        for (PixelPost post : posts) {
-            SquarePlacement placement = byPost.get(post.getId());
+        Map<UUID, DailyStatus> statusesByUser = new HashMap<>();
+        for (DailyStatus status : statusRepository.findByUserIdInAndStatusDate(userIds, today)) {
+            statusesByUser.put(status.getUserId(), status);
+        }
 
+        Map<UUID, SquarePlacement> placementsByUser = new LinkedHashMap<>();
+        for (SquarePlacement placement : placementRepository.findForUsers(today, userIds)) {
+            placementsByUser.put(placement.getUserId(), placement);
+        }
+
+        List<SquarePlacement> allToday = placementRepository.findByKeyPresenceDateOrderByYAsc(today);
+        List<SquarePlacementAllocator.Point> taken = new ArrayList<>(allocator.toPoints(allToday));
+
+        List<Occupant> occupants = new ArrayList<>(presences.size());
+        for (SquarePresence presence : presences) {
+            UUID userId = presence.getUserId();
+            PixelCharacter character = charactersById.get(currentCharacterIds.get(userId));
+            if (character == null) {
+                // No Current PIXME yet (never generated) — nothing to render.
+                continue;
+            }
+
+            SquarePlacement placement = placementsByUser.get(userId);
             if (placement == null) {
-                placement = allocateFor(today, post, taken);
+                placement = allocateFor(today, userId, taken);
             }
 
             taken.add(new SquarePlacementAllocator.Point(
                     placement.getX(), placement.getY(), placement.getDepth()));
-            occupants.add(new Occupant(post, placement));
+            occupants.add(new Occupant(presence, character, statusesByUser.get(userId), placement));
         }
 
         // Painter's order: further back first, so a front-row character
@@ -165,18 +244,14 @@ public class SquareService {
     }
 
     private SquarePlacement allocateFor(
-            LocalDate today, PixelPost post, List<SquarePlacementAllocator.Point> taken) {
+            LocalDate today, UUID userId, List<SquarePlacementAllocator.Point> taken) {
 
-        // Replacing today's representative post moves that user's spot rather
-        // than adding a second character for them.
-        placementRepository.deleteForUserOnDate(today, post.getUserId());
-
-        long seed = today.toEpochDay() * 31L + post.getId().getLeastSignificantBits();
+        long seed = today.toEpochDay() * 31L + userId.getLeastSignificantBits();
         SquarePlacementAllocator.Point point = allocator.allocate(taken, seed);
 
-        short idleVariant = (short) Math.abs(post.getId().hashCode() % 3);
-        SquarePlacement placement = new SquarePlacement(
-                today, post.getId(), post.getUserId(), point.x(), point.y(), point.depth(), idleVariant);
+        short idleVariant = (short) Math.abs(userId.hashCode() % 3);
+        SquarePlacement placement =
+                new SquarePlacement(today, userId, point.x(), point.y(), point.depth(), idleVariant);
 
         return placementRepository.save(placement);
     }
@@ -194,9 +269,9 @@ public class SquareService {
      *   <li><b>No monopoly.</b> A user appears in at most one rail, and the
      *       hearts rail mixes reaction <em>rate</em> with recency so the same
      *       popular accounts don't own it every day.
-     *   <li><b>Room for newcomers.</b> The "just arrived" rail is pure recency,
-     *       which guarantees someone who published a minute ago is visible
-     *       regardless of how many hearts they have.
+     *   <li><b>Room for newcomers.</b> The "just arrived" rail is pure
+     *       presence recency, which guarantees someone who just entered is
+     *       visible regardless of how many hearts they have.
      * </ul>
      */
     private List<Curation> buildCurations(
@@ -205,16 +280,17 @@ public class SquareService {
         int size = properties.square().curationSize();
         var page = PageRequest.of(0, size * 4);
 
-        // Already-featured users, so one person never fills two rails.
+        List<SquarePresence> pool = presenceRepository.findOccupants(today, excluded, excludedIsEmpty, page);
+        List<Occupant> candidates = withPlacements(today, pool);
+
         Set<UUID> featured = new HashSet<>();
         List<Curation> curations = new ArrayList<>(4);
 
         /* 🔥 오늘 많이 받은 하트 — rate-weighted, not a raw count ranking. */
-        List<PixelPost> hearted = postRepository
-                .findTopHearted(today, excluded, excludedIsEmpty, page)
-                .stream()
+        List<Occupant> hearted = candidates.stream()
+                .filter(occupant -> occupant.status() != null)
                 .sorted(Comparator.comparingDouble(this::heartScore).reversed())
-                .filter(post -> featured.add(post.getUserId()))
+                .filter(occupant -> featured.add(occupant.presence().getUserId()))
                 .limit(size)
                 .toList();
         if (!hearted.isEmpty()) {
@@ -222,10 +298,11 @@ public class SquareService {
         }
 
         /* ✨ 지금 막 도착했어요 */
-        List<PixelPost> fresh = postRepository
-                .findFreshest(today, excluded, excludedIsEmpty, page)
-                .stream()
-                .filter(post -> featured.add(post.getUserId()))
+        List<Occupant> fresh = candidates.stream()
+                .sorted(Comparator.comparing(
+                        (Occupant occupant) -> occupant.presence().getEnteredAt())
+                        .reversed())
+                .filter(occupant -> featured.add(occupant.presence().getUserId()))
                 .limit(size)
                 .toList();
         if (!fresh.isEmpty()) {
@@ -234,23 +311,19 @@ public class SquareService {
 
         /* 🌙 지금 활동 중 */
         Set<UUID> activeUserIds = new HashSet<>(userRepository.findActiveSince(
-                app.pixme.user.domain.UserStatus.ACTIVE, clock.now().minus(ACTIVE_WINDOW)));
-        List<PixelPost> active = postRepository
-                .findSquareOccupants(today, excluded, excludedIsEmpty, page)
-                .stream()
-                .filter(post -> activeUserIds.contains(post.getUserId()))
-                .filter(post -> featured.add(post.getUserId()))
+                UserStatus.ACTIVE, clock.now().minus(ACTIVE_WINDOW)));
+        List<Occupant> active = candidates.stream()
+                .filter(occupant -> activeUserIds.contains(occupant.presence().getUserId()))
+                .filter(occupant -> featured.add(occupant.presence().getUserId()))
                 .limit(size)
                 .toList();
         if (!active.isEmpty()) {
             curations.add(new Curation(CurationCode.ACTIVE, "🌙 지금 활동 중", active));
         }
 
-        /* 💫 오늘 자주 보이는 PIXME — consistent posters, by streak. */
-        List<PixelPost> recurring = postRepository
-                .findSquareOccupants(today, excluded, excludedIsEmpty, page)
-                .stream()
-                .filter(post -> featured.add(post.getUserId()))
+        /* 💫 오늘 자주 보이는 PIXME — remaining room in the candidate pool. */
+        List<Occupant> recurring = candidates.stream()
+                .filter(occupant -> featured.add(occupant.presence().getUserId()))
                 .limit(size)
                 .toList();
         if (!recurring.isEmpty()) {
@@ -263,26 +336,29 @@ public class SquareService {
     /**
      * Blends reaction rate with absolute hearts and freshness.
      *
-     * <p>Rate alone over-rewards a post with 1 heart and 2 views; count alone
-     * entrenches established accounts. The log term keeps big numbers from
-     * dominating, and the recency term means yesterday's winner doesn't sit
-     * there all of today.
+     * <p>Rate alone over-rewards a status with 1 heart and 2 views; count
+     * alone entrenches established accounts. The log term keeps big numbers
+     * from dominating, and the recency term means yesterday's winner doesn't
+     * sit there all of today.
      */
-    private double heartScore(PixelPost post) {
-        int views = Math.max(post.getViewCount(), 1);
-        double rate = (double) post.getHeartCount() / views;
-        double magnitude = Math.log1p(post.getHeartCount());
-        var published = Optional.ofNullable(post.getPublishedAt()).orElse(post.getCreatedAt());
-        double hoursOld = Math.max(0, Duration.between(published, clock.now()).toMinutes() / 60.0);
+    private double heartScore(Occupant occupant) {
+        DailyStatus status = occupant.status();
+        int views = Math.max(status.getViewCount(), 1);
+        double rate = (double) status.getHeartCount() / views;
+        double magnitude = Math.log1p(status.getHeartCount());
+        double hoursOld = Math.max(
+                0, Duration.between(status.getUpdatedAt(), clock.now()).toMinutes() / 60.0);
         double freshness = Math.exp(-hoursOld / 8.0);
         return rate * 10 + magnitude * 2 + freshness * 3;
     }
 
     /* --------------------------------------------------------- maintenance */
 
-    /** Keeps the placement table bounded; yesterday's square is never read. */
+    /** Keeps presence and placement tables bounded; yesterday's square is never read. */
     @Transactional
     public int pruneOldPlacements(int keepDays) {
-        return placementRepository.deleteOlderThan(clock.today().minusDays(keepDays));
+        LocalDate threshold = clock.today().minusDays(keepDays);
+        presenceRepository.deleteOlderThan(threshold);
+        return placementRepository.deleteOlderThan(threshold);
     }
 }

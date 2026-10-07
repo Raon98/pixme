@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import app.pixme.api.dto.DailyStatusDtos;
 import app.pixme.api.dto.MeResponse;
 import app.pixme.api.dto.UserDtos;
 import app.pixme.auth.AuthService;
@@ -11,10 +12,11 @@ import app.pixme.common.ApiException;
 import app.pixme.common.CursorPage;
 import app.pixme.common.Cursors;
 import app.pixme.common.ErrorCode;
+import app.pixme.dailystatus.DailyStatusService;
+import app.pixme.dailystatus.domain.DailyStatus;
+import app.pixme.dailystatus.repository.DailyStatusRepository;
 import app.pixme.notification.NotificationService;
 import app.pixme.notification.domain.PushPlatform;
-import app.pixme.pixel.PixelPostService;
-import app.pixme.pixel.domain.PixelPost;
 import app.pixme.safety.SafetyService;
 import app.pixme.security.AuthPrincipal;
 import app.pixme.security.CurrentUser;
@@ -22,6 +24,7 @@ import app.pixme.user.UserService;
 import app.pixme.user.domain.User;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,11 +40,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class UserController {
 
-    private static final int RECENT_POSTS = 9;
+    private static final int RECENT_STATUSES = 9;
 
     private final UserService userService;
     private final SafetyService safetyService;
-    private final PixelPostService postService;
+    private final DailyStatusService dailyStatusService;
+    private final DailyStatusRepository statusRepository;
     private final NotificationService notificationService;
     private final AuthService authService;
     private final ResponseAssembler assembler;
@@ -51,7 +55,8 @@ public class UserController {
     public UserController(
             UserService userService,
             SafetyService safetyService,
-            PixelPostService postService,
+            DailyStatusService dailyStatusService,
+            DailyStatusRepository statusRepository,
             NotificationService notificationService,
             AuthService authService,
             ResponseAssembler assembler,
@@ -59,7 +64,8 @@ public class UserController {
             app.pixme.connection.ConnectionService connectionService) {
         this.userService = userService;
         this.safetyService = safetyService;
-        this.postService = postService;
+        this.dailyStatusService = dailyStatusService;
+        this.statusRepository = statusRepository;
         this.notificationService = notificationService;
         this.authService = authService;
         this.assembler = assembler;
@@ -101,7 +107,8 @@ public class UserController {
                                         request.settings().pushConnected(),
                                         request.settings().pushMessage(),
                                         request.settings().pushDailyReminder(),
-                                        request.settings().keepOriginalPhoto())));
+                                        request.settings().keepOriginalPhoto(),
+                                        request.settings().squareVisible())));
 
         return assembler.me(user);
     }
@@ -158,9 +165,10 @@ public class UserController {
             throw ApiException.notFound("사용자");
         }
 
-        PixelPost todayPost = postService.findTodayRepresentative(userId).orElse(null);
-        List<PixelPost> recent =
-                postService.publicHistory(userId, null, null, RECENT_POSTS);
+        DailyStatus todayStatus = dailyStatusService.today(userId).orElse(null);
+        List<DailyStatus> recent = statusRepository.findPublicHistory(
+                userId, List.of(), true, Cursors.OPEN_DATE, Cursors.OPEN_ID,
+                PageRequest.of(0, RECENT_STATUSES));
 
         UUID conversationId = null;
         if (connectionService.relationStatus(principal.userId(), userId)
@@ -175,11 +183,11 @@ public class UserController {
         }
 
         return assembler.publicProfile(
-                principal.userId(), target, todayPost, recent, conversationId);
+                principal.userId(), target, todayStatus, recent, conversationId);
     }
 
     @GetMapping("/users/{userId}/pixels")
-    public CursorPage<app.pixme.api.dto.PixelDtos.PostSummaryResponse> userPixels(
+    public CursorPage<DailyStatusDtos.StatusSummaryResponse> userDailyStatuses(
             @CurrentUser AuthPrincipal principal,
             @PathVariable UUID userId,
             @RequestParam(required = false) String cursor,
@@ -193,22 +201,23 @@ public class UserController {
         Cursors.Keyset keyset = Cursors.decode(cursor);
         int capped = Math.min(Math.max(limit, 1), 60);
 
-        List<PixelPost> posts = postService.publicHistory(
+        List<DailyStatus> statuses = statusRepository.findPublicHistory(
                 userId,
-                keyset == null ? null : java.time.LocalDate.ofInstant(
-                        keyset.timestamp(), java.time.ZoneOffset.UTC),
-                keyset == null ? null : keyset.id(),
-                capped + 1);
+                List.of(),
+                true,
+                Cursors.dateOrOpen(keyset),
+                Cursors.idOrOpen(keyset),
+                PageRequest.of(0, capped + 1));
 
-        boolean hasMore = posts.size() > capped;
-        List<PixelPost> page = hasMore ? posts.subList(0, capped) : posts;
+        boolean hasMore = statuses.size() > capped;
+        List<DailyStatus> page = hasMore ? statuses.subList(0, capped) : statuses;
 
         String nextCursor = hasMore && !page.isEmpty()
                 ? Cursors.encodeDate(
-                        page.get(page.size() - 1).getPostDate(), page.get(page.size() - 1).getId())
+                        page.get(page.size() - 1).getStatusDate(), page.get(page.size() - 1).getId())
                 : null;
 
-        return CursorPage.of(assembler.summaries(page), nextCursor);
+        return CursorPage.of(assembler.statusSummaries(page), nextCursor);
     }
 
     /* ------------------------------------------------------------- safety */

@@ -11,28 +11,18 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface SquarePlacementRepository
-        extends JpaRepository<SquarePlacement, SquarePlacement.Key> {
+public interface SquarePlacementRepository extends JpaRepository<SquarePlacement, SquarePlacement.Key> {
 
-    List<SquarePlacement> findByKeyPostDateOrderByYAsc(LocalDate postDate);
+    List<SquarePlacement> findByKeyPresenceDateOrderByYAsc(LocalDate presenceDate);
 
     @Query("""
             select p from SquarePlacement p
-            where p.key.postDate = :postDate and p.key.postId in :postIds
+            where p.key.presenceDate = :presenceDate and p.key.userId in :userIds
             """)
-    List<SquarePlacement> findForPosts(
-            @Param("postDate") LocalDate postDate, @Param("postIds") Collection<UUID> postIds);
-
-    @Query("select p.userId from SquarePlacement p where p.key.postDate = :postDate")
-    List<UUID> findPlacedUserIds(@Param("postDate") LocalDate postDate);
+    List<SquarePlacement> findForUsers(
+            @Param("presenceDate") LocalDate presenceDate, @Param("userIds") Collection<UUID> userIds);
 
     @Modifying
-    @Query("delete from SquarePlacement p where p.key.postDate < :threshold")
+    @Query("delete from SquarePlacement p where p.key.presenceDate < :threshold")
     int deleteOlderThan(@Param("threshold") LocalDate threshold);
-
-    /** Replacing today's representative post must move the placement with it. */
-    @Modifying
-    @Query("delete from SquarePlacement p where p.key.postDate = :postDate and p.userId = :userId")
-    void deleteForUserOnDate(
-            @Param("postDate") LocalDate postDate, @Param("userId") UUID userId);
 }
