@@ -115,10 +115,16 @@ export const copy = {
     /** Only on the first character's result screen. */
     freeRetry: '한 번 더 무료로 만들어보기',
     freeRetryHint: '첫 PIXME는 한 번 더 무료로 만들어볼 수 있어요.',
-    /** Shown after the free retry, when there are two candidates. */
+    /** Shown whenever a retry produced a second candidate. */
     compareTitle: '마음에 드는 쪽을 골라주세요.',
     compareFirst: '처음 만든 모습',
     compareSecond: '다시 만든 모습',
+    compareHint: '두 모습 모두 내 기록에 남아요.',
+    /**
+     * Said before the credit is spent, not after. The attempt is what is paid
+     * for, so keeping the first character does not get it back.
+     */
+    retryConsumesNotice: '새로 만들면 생성권이 사용돼요. 기존 모습을 골라도 돌아오지 않아요.',
     retryCostFree: '무료로 만들 수 있어요.',
     retryCostCredit: '추가 생성권 1개가 사용돼요.',
     retryNoCredit: '생성권이 없어요. 스토어에서 받아볼까요?',

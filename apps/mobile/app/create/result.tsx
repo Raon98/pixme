@@ -177,6 +177,14 @@ export default function ResultRoute() {
             <Text variant="title2" align="center" style={styles.compareTitle}>
               {copy.generation.compareTitle}
             </Text>
+            <Text
+              variant="caption"
+              tone="secondary"
+              align="center"
+              style={styles.compareHint}
+            >
+              {copy.generation.compareHint}
+            </Text>
 
             <View style={styles.compareRow}>
               {completed.map((candidate, index) => (
@@ -237,11 +245,7 @@ export default function ResultRoute() {
       <ConfirmDialog
         visible={retryPrompt}
         title={copy.generation.retry}
-        body={
-          bonusFree > 0
-            ? copy.generation.bonusRemainingCount(bonusFree)
-            : copy.generation.retryCostCredit
-        }
+        body={copy.generation.retryConsumesNotice}
         confirmLabel={copy.generation.retry}
         onConfirm={() => {
           setRetryPrompt(false);
@@ -310,7 +314,8 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   title: { marginTop: spacing.xl },
-  compareTitle: { marginBottom: spacing.xl },
+  compareTitle: { marginBottom: spacing.sm },
+  compareHint: { marginBottom: spacing.xl },
   compareRow: { flexDirection: 'row' },
   candidate: {
     flex: 1,

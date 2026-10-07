@@ -68,6 +68,9 @@ class GenerationFlowIntegrationTest {
     @Autowired
     private app.pixme.ai.MasterCharacterReference masterReference;
 
+    @Autowired
+    private GenerationPipeline pipeline;
+
     /**
      * Clears today's published content before each run.
      *
@@ -298,6 +301,118 @@ class GenerationFlowIntegrationTest {
         var spec = masterReference.spec();
         assertThat(image.getWidth()).isEqualTo(spec.canvasSize());
         assertThat(image.getHeight()).isEqualTo(spec.canvasSize());
+    }
+
+    @Test
+    @DisplayName("재생성은 기존 캐릭터를 덮어쓰지 않고 둘 다 남긴다")
+    void retryKeepsBothCharacters() {
+        User author = fixtures.activeUser("keep");
+        PixelGeneration first = generateOnce(author);
+        awaitTerminal(author, first.getId());
+
+        PixelGeneration retry = generationService.retry(
+                author.getId(), first.getId(), PixelStyle.PIXME_BASIC, null);
+        awaitTerminal(author, retry.getId());
+
+        // Both survive and are offered side by side; nothing was overwritten.
+        var candidates = generationService.candidatesFor(author.getId(), retry.getId());
+        assertThat(candidates).hasSize(2);
+        assertThat(candidates)
+                .allSatisfy(candidate ->
+                        assertThat(candidate.getGeneratedObjectKey()).isNotNull());
+    }
+
+    @Test
+    @DisplayName("새 결과가 나왔다면 기존 캐릭터를 골라도 생성권은 소비된다")
+    void choosingTheOlderCandidateStillConsumesTheAllowance() {
+        User author = fixtures.activeUser("chose");
+
+        PixelGeneration first = generateOnce(author);
+        awaitTerminal(author, first.getId());
+
+        PixelGeneration retry = generationService.retry(
+                author.getId(), first.getId(), PixelStyle.PIXME_BASIC, null);
+        awaitTerminal(author, retry.getId());
+
+        CreditService.Allowance beforePublish = creditService.allowance(author.getId());
+
+        // The user compares and keeps the ORIGINAL character.
+        postService.publish(
+                author.getId(),
+                first.getId(),
+                new PixelPostService.PublishCommand(null, null, List.of(), false));
+
+        // The AI did its job, so the attempt is paid for either way. Refunding
+        // on "I preferred the first one" would make retrying free in practice.
+        CreditService.Allowance afterPublish = creditService.allowance(author.getId());
+        assertThat(afterPublish).isEqualTo(beforePublish);
+        assertThat(afterPublish.firstRetryAvailable()).isFalse();
+        assertThat(afterPublish.bonusFreeCredits()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("생성 자체가 실패하면 생성권은 자동으로 복구된다")
+    void failedGenerationRefundsTheAllowance() {
+        User author = fixtures.activeUser("fail");
+
+        // Spend the first generation and the retry so the next attempt is paid.
+        creditService.spendForGeneration(author.getId(), UUID.randomUUID());
+        creditService.spendForFirstRetry(author.getId(), UUID.randomUUID());
+        creditService.spendForGeneration(author.getId(), UUID.randomUUID()); // bonus
+
+        creditService.grant(
+                author.getId(), 1, app.pixme.store.domain.CreditReason.PURCHASE, null);
+
+        PixelGeneration generation = generateOnce(author);
+        assertThat(generation.getSpendKind())
+                .isEqualTo(app.pixme.store.domain.SpendKind.PAID_CREDIT);
+        assertThat(creditService.allowance(author.getId()).creditBalance()).isZero();
+
+        awaitTerminal(author, generation.getId());
+
+        // A provider or server failure must never cost the user anything.
+        pipeline.fail(
+                generation.getId(),
+                app.pixme.pixel.domain.GenerationFailureReason.PROVIDER_ERROR,
+                "simulated provider outage");
+
+        // (Already COMPLETED here, so force the path the reaper would take.)
+        PixelGeneration failed = failFreshGeneration(author);
+        assertThat(creditService.allowance(author.getId()).creditBalance()).isEqualTo(1);
+        assertThat(generationService.get(author.getId(), failed.getId()).getCreditRefundedAt())
+                .isNotNull();
+    }
+
+    /** Starts a generation and fails it before the worker can complete it. */
+    private PixelGeneration failFreshGeneration(User author) {
+        creditService.grant(
+                author.getId(), 1, app.pixme.store.domain.CreditReason.PROMOTION, null);
+
+        UUID uploadId = generationService
+                .createUpload(author.getId(), "image/jpeg", 100)
+                .uploadId();
+        // Deliberately do NOT store the original: the pipeline cannot read it,
+        // which is exactly the shape of a storage or provider failure.
+        PixelGeneration generation = generationService.start(
+                author.getId(), uploadId, PixelStyle.PIXME_BASIC, null);
+
+        await().atMost(Duration.ofSeconds(20))
+                .pollInterval(Duration.ofMillis(200))
+                .until(() -> generationService
+                        .get(author.getId(), generation.getId())
+                        .getStatus()
+                        .isTerminal());
+
+        return generation;
+    }
+
+    private PixelGeneration generateOnce(User author) {
+        UUID uploadId = generationService
+                .createUpload(author.getId(), "image/jpeg", 100)
+                .uploadId();
+        ((InMemoryStorageService) storageService)
+                .putOriginal(captureObjectKey(author, uploadId), fakeJpeg());
+        return generationService.start(author.getId(), uploadId, PixelStyle.PIXME_BASIC, null);
     }
 
     private void awaitTerminal(User author, UUID generationId) {

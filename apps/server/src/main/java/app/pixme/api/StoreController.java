@@ -30,23 +30,25 @@ public class StoreController {
      * PIXME+ benefits.
      *
      * <p>Copy lives here rather than in the client so the offer can change
-     * without a release. Note what is absent: nothing in this list touches
-     * hearts, waves, connections or chat — the subscription buys
-     * self-expression, never access to other people.
+     * without a release.
+     *
+     * <p>Note what is absent, and that the absence is the positioning: nothing
+     * here touches the feed, the square, hearts, waves, connections, chat,
+     * profiles or history. PIXME+ is an <em>optional</em> subscription for
+     * people who generate and decorate often — not the base plan, and not a
+     * way to buy access to other people.
      */
     private static final List<StoreDtos.PlusBenefitResponse> PLUS_BENEFITS = List.of(
             new StoreDtos.PlusBenefitResponse(
-                    "MONTHLY_CREDITS", "매달 생성권 10개", "마음에 드는 모습이 나올 때까지.", "✨"),
+                    "MONTHLY_CREDITS", "매달 생성권 15회", "자주 만드는 사람을 위한 넉넉한 양.", "✨"),
             new StoreDtos.PlusBenefitResponse(
-                    "PREMIUM_STYLES", "특별 스타일", "구독 기간 동안 프리미엄 픽셀 스타일을 쓸 수 있어요.", "🎨"),
-            new StoreDtos.PlusBenefitResponse(
-                    "PREMIUM_BACKGROUNDS", "프리미엄 배경", "카드 배경과 프레임을 더 자유롭게.", "🖼"),
+                    "PREMIUM_BACKGROUNDS", "프리미엄 배경", "카드 배경을 더 자유롭게.", "🖼"),
             new StoreDtos.PlusBenefitResponse(
                     "PROFILE_THEME", "프로필 테마", "내 공간을 내 취향대로.", "🌈"),
             new StoreDtos.PlusBenefitResponse(
-                    "EXTENDED_HISTORY", "기록 확장", "지난 PIXME를 더 오래, 더 자세히 볼 수 있어요.", "📚"),
+                    "PIXEL_EFFECT", "픽셀 이펙트", "반응을 받을 때의 연출을 특별하게.", "💫"),
             new StoreDtos.PlusBenefitResponse(
-                    "NO_ADS", "광고 없음", "조용한 PIXME를 그대로.", "🔇"));
+                    "PREMIUM_STYLES", "일부 프리미엄 스타일", "구독 기간 동안 특별 스타일을 쓸 수 있어요.", "🎨"));
 
     private final StoreService storeService;
     private final CreditService creditService;

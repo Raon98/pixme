@@ -150,6 +150,27 @@ Collapsing these into one number would lose exactly the distinctions that make
 them work — and would make a refund unable to give back the right thing, which
 is why `SpendKind` is recorded on every generation.
 
+### Regeneration never overwrites — the user compares and chooses
+
+A retry produces a *second* candidate; it never replaces the first. The result
+screen shows both and the user picks. This is also why the free first retry
+exists as its own entitlement rather than a second attempt at the same
+screen — the two characters are meant to sit side by side.
+
+The credit rule follows from what is actually being sold: **the attempt**, not
+the outcome.
+
+- If the AI produced a genuine new result, the attempt is charged — even if the
+  user compares the two and keeps the original. Refunding on "I preferred the
+  first one" would make every retry free in practice, since there is no way to
+  tell a disappointed retry from a successful one the user simply liked less.
+- If generation itself failed — provider error, server error, timeout, a
+  storage failure, any internal fault — nothing is charged, and whatever was
+  reserved is returned automatically. See "The user never pays for a character
+  they didn't get" below.
+- Idempotency (`clientRequestId`) still protects a double-tapped button or a
+  retried network call from charging twice for the *same* attempt.
+
 ### The user never pays for a character they didn't get
 
 - The allowance is spent *before* dispatch, so two parallel requests can't both
@@ -193,22 +214,42 @@ the character exists. See `PRIVACY.md`.
 
 ## Monetisation shape
 
-| Item | Price | Kind |
-| --- | --- | --- |
-| First generation + its retry + one bonus credit | free, once per account | — |
-| PIXME 1회 | ₩900 | consumable |
-| PIXME 3회 | ₩1,900 | consumable |
-| PIXME 10회 | ₩4,900 | consumable |
-| Styles — Y2K / 16-bit / Retro PC / Arcade / Mini / Soft | ₩2,900 each | non-consumable |
-| Decoration — backgrounds, frames, particles, nickname effects | ₩1,900 | non-consumable |
-| Decoration — animated backgrounds, poses, profile themes | ₩2,900 | non-consumable |
-| Decoration — special profile themes | ₩3,900 | non-consumable |
-| PIXME+ | ₩4,900 / month | subscription (+10 credits monthly) |
+**PIXME+ is not the base plan.** The social product — feed, square, hearts,
+waves, connections, chat, profiles, history, and re-selecting an
+already-generated character — is free for everyone, full stop. PIXME+ is an
+*optional* subscription for people who generate and decorate often.
 
-Every one of these is a row in the `products` table. No price appears in either
-source tree; the app always prefers the platform store's localised price and
-uses the table value only as a fallback for the moment before the store
+Each paid product has exactly one job, deliberately non-overlapping:
+
+| Need | Product | Price | Per generation | Expiry |
+| --- | --- | --- | --- | --- |
+| Occasional extra | PIXME 1회 | ₩900 | ₩900 | never |
+| A few more | PIXME 3회 | ₩1,900 | ₩633 | never |
+| Stock up | PIXME 10회 | ₩4,900 | ₩490 | **never** |
+| Generate often | PIXME+ | ₩5,900 / month | ₩393 (15/mo) | — |
+
+Purchased credits **never expire** — a 10-pack bought in January is still
+spendable in June. PIXME+ additionally includes premium backgrounds, profile
+themes, a pixel effect, and some premium styles for the duration of the
+subscription.
+
+The 10-pack and PIXME+ were originally both ₩4,900 for 10 generations, which
+made the pack strictly dominated — PIXME+ gave the same credits plus cosmetics,
+so buying the pack was never rational. Re-pricing PIXME+ to ₩5,900 for 15 is
+what keeps "buy several up front" and "I generate often" as two genuinely
+different choices instead of one obviously-better one.
+
+Every price above is a row in the `products` table. Nothing is hardcoded in
+either source tree; the app always prefers the platform store's localised price
+and uses the table value only as a fallback for the moment before the store
 answers. Repricing, a promo or a new market is a data change.
+
+### No ads at launch
+
+Rewarded ads are built (`features.rewardedAds` in `/system/config`) but
+**off**. If ever enabled, the only shape is a limited relief valve for
+non-paying users — "주 1회 광고 시청 후 PIXME 생성 1회" — not a general earning
+mechanic. Interstitials are not used anywhere in the product.
 
 ### Poses and emotions do not apply in the square
 
