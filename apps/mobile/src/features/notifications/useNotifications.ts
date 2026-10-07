@@ -16,6 +16,7 @@ import {
   type Page,
 } from '@/api';
 import { logger } from '@/lib/logger';
+import { MOCK_MODE } from '@/lib/mock';
 import { registerForPush, setBadgeCount } from '@/lib/push';
 import { config } from '@/lib/config';
 import { storage, StorageKey } from '@/lib/storage';
@@ -74,7 +75,9 @@ export function usePushRegistration() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (sessionState !== 'signed-in') return;
+    // No native push module reliably available in a browser preview, and
+    // nothing server-side to register a token with anyway.
+    if (MOCK_MODE || sessionState !== 'signed-in') return;
 
     void (async () => {
       const alreadySynced = await storage.getItem<string>(
@@ -123,6 +126,7 @@ export function usePushRegistration() {
   }, [queryClient]);
 
   const promptNow = async () => {
+    if (MOCK_MODE) return false;
     const token = await registerForPush();
     if (!token) return false;
     try {

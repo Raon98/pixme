@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { qk, type Conversation, type Message, type Page } from '@/api';
+import { MOCK_MODE } from '@/lib/mock';
 
 import { useAuthStore } from '../auth/authStore';
 import { chatSocket, type ServerFrame, type SocketStatus } from './socket';
@@ -19,7 +20,10 @@ export function useChatSocketBridge() {
   const sessionState = useAuthStore((state) => state.sessionState);
 
   useEffect(() => {
-    if (sessionState !== 'signed-in' || !accessToken) {
+    // Mock mode has no server to connect to — every chat action is already
+    // answered locally by `src/api/mock.ts`. Attempting a real connection
+    // would just retry against an unreachable `wsBaseUrl` forever.
+    if (MOCK_MODE || sessionState !== 'signed-in' || !accessToken) {
       chatSocket.disconnect();
       return;
     }

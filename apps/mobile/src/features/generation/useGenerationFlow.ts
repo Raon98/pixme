@@ -11,6 +11,7 @@ import {
 import { ApiErrorCode, toApiError } from '@/api/errors';
 import { analytics } from '@/lib/analytics';
 import { logger } from '@/lib/logger';
+import { MOCK_MODE } from '@/lib/mock';
 
 import { useAuthStore } from '../auth/authStore';
 import { useGenerationStore } from './generationStore';
@@ -206,8 +207,14 @@ export function useGenerationFlow() {
           !!options?.isRetry && !!currentDraft.generation?.id;
 
         if (!uploadId && !isRetryOfExisting) {
-          const info = await FileSystem.getInfoAsync(currentDraft.source.uri);
-          const byteSize = info.exists && 'size' in info ? info.size : 0;
+          // Mock mode never puts bytes anywhere real — `ticket.uploadUrl` is a
+          // placeholder — so there is nothing to size or PUT.
+          const byteSize = MOCK_MODE
+            ? 0
+            : await (async () => {
+                const info = await FileSystem.getInfoAsync(currentDraft.source.uri);
+                return info.exists && 'size' in info ? info.size : 0;
+              })();
 
           const ticket = await pixelsApi.createUploadTicket({
             mimeType: currentDraft.source.mimeType,
@@ -216,12 +223,14 @@ export function useGenerationFlow() {
 
           applyProgress(0.12);
 
-          await uploadToPresignedUrl({
-            uploadUrl: ticket.uploadUrl,
-            headers: ticket.headers,
-            fileUri: currentDraft.source.uri,
-            mimeType: currentDraft.source.mimeType,
-          });
+          if (!MOCK_MODE) {
+            await uploadToPresignedUrl({
+              uploadUrl: ticket.uploadUrl,
+              headers: ticket.headers,
+              fileUri: currentDraft.source.uri,
+              mimeType: currentDraft.source.mimeType,
+            });
+          }
 
           uploadId = ticket.uploadId;
           setUploadId(uploadId);

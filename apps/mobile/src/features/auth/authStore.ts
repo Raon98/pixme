@@ -10,6 +10,7 @@ import {
 } from '@/api';
 import { analytics } from '@/lib/analytics';
 import { logger } from '@/lib/logger';
+import { MOCK_MODE } from '@/lib/mock';
 import { secureStorage, storage, StorageKey } from '@/lib/storage';
 
 const log = logger('auth');
@@ -52,6 +53,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
 
   async bootstrap() {
+    // Preview mode: skip real auth entirely and sign straight in as the mock
+    // user, so the app lands on the tabs instead of the login screen. See
+    // `src/lib/mock.ts`.
+    if (MOCK_MODE) {
+      const user = await usersApi.me();
+      set({
+        accessToken: 'mock-access-token',
+        refreshToken: 'mock-refresh-token',
+        user,
+        sessionState: resolveSessionState(user),
+      });
+      return;
+    }
+
     const [accessToken, refreshToken] = await Promise.all([
       secureStorage.get(StorageKey.AccessToken),
       secureStorage.get(StorageKey.RefreshToken),
