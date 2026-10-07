@@ -165,6 +165,11 @@ pixme:
       analysis-model: ${PIXME_OPENAI_ANALYSIS_MODEL:gpt-5}
       image-model: ${PIXME_OPENAI_IMAGE_MODEL:gpt-image-1}
       moderation-model: ${PIXME_OPENAI_MODERATION_MODEL:omni-moderation-latest}
+      # low | medium | high. The biggest lever on cost per generation, and the
+      # output is a flat-palette sprite shown at 72-300px — the top tier is
+      # usually paying for detail the product discards. Compare renders before
+      # changing.
+      image-quality: ${PIXME_OPENAI_IMAGE_QUALITY:medium}
     flux:
       api-key: ${PIXME_FLUX_API_KEY:}
       base-url: ${PIXME_FLUX_BASE_URL:https://api.bfl.ai/v1}

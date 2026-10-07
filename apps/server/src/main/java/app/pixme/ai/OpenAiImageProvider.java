@@ -226,12 +226,14 @@ public class OpenAiImageProvider implements PixelImageProvider {
         form.add("model", config.openai().imageModel());
         form.add("prompt", prompt);
         form.add("n", "1");
+        // The provider's square option. Any mismatch with the character
+        // spec's canvas is reconciled by CharacterNormalizer afterwards.
         form.add("size", "1024x1024");
         // Transparency is non-negotiable: characters composite onto feed cards
         // and onto the square scene.
         form.add("background", "transparent");
         form.add("output_format", "png");
-        form.add("quality", "high");
+        form.add("quality", config.openai().imageQuality());
 
         // Order matters — the prompt refers to them as Image A and Image B.
         form.add("image[]", namedPart(request.sourceImage(), "image-a-user-photo", request.sourceMimeType()));
@@ -261,7 +263,7 @@ public class OpenAiImageProvider implements PixelImageProvider {
                         "size", "1024x1024",
                         "background", "transparent",
                         "output_format", "png",
-                        "quality", "high"))
+                        "quality", config.openai().imageQuality()))
                 .retrieve()
                 .body(JsonNode.class);
     }

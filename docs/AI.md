@@ -191,6 +191,29 @@ outage would take the product down. The failure is logged.
 
 ## Cost control
 
+Generation is the only variable cost in the product, and the only one that
+scales with engagement. It is also the thing being sold, which makes the unit
+economics a product question rather than an infrastructure one.
+
+The levers, in order of impact:
+
+1. **`pixme.ai.openai.image-quality`** — `low` / `medium` / `high`. Easily a
+   multiple-times difference in cost per render. PIXME's output is a
+   flat-palette sprite that is normalised and displayed at 72–300px, so the top
+   tier is usually paying for detail the product discards. Default is `medium`;
+   compare renders at each tier before committing.
+2. **Analysis reuse on retries** — a retry re-renders the stored analysis and
+   never pays for the vision pass twice.
+3. **Client-side downscale** — the app resizes to a 1280px long edge and strips
+   EXIF before upload, so we never pay to move or analyse a 12MP original.
+4. **Caps** — a hard per-day ceiling (`pixme.generation.max-per-day`) and a
+   10/hour rate limit, as a backstop against a scripted client.
+
+To sanity-check a price point: net revenue is the list price minus the store's
+cut (30%, or 15% on the small-business programme), and cost is roughly
+*(image render + vision analysis) × generations granted*. Moderation is free.
+If that product is negative, the plan is subsidising usage.
+
 - Free generation is an onboarding grant only — first generation, one free
   retry of that first result, one bonus credit — then paid. See `PRODUCT.md`.
 - A hard per-day cap (`pixme.generation.max-per-day`, default 20) as a backstop

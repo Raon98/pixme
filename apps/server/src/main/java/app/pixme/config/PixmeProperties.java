@@ -78,12 +78,20 @@ public record PixmeProperties(
         public record MasterReference(
                 String resource, String mimeType, String version, boolean required) {}
 
+        /**
+         * @param imageQuality {@code low} · {@code medium} · {@code high}. This
+         *     is the single biggest lever on cost per generation, and PIXME's
+         *     output is a flat-palette sprite that gets normalised and shown at
+         *     72–300px — so the top tier is usually paying for detail the
+         *     product throws away. Measure before choosing.
+         */
         public record OpenAi(
                 String apiKey,
                 String baseUrl,
                 String analysisModel,
                 String imageModel,
-                String moderationModel) {}
+                String moderationModel,
+                String imageQuality) {}
 
         public record Flux(String apiKey, String baseUrl, String imageModel) {}
     }
