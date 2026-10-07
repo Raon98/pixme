@@ -193,13 +193,30 @@ the character exists. See `PRIVACY.md`.
 
 ## Monetisation shape
 
-| Thing | Price source |
-| --- | --- |
-| First generation, its retry, one bonus credit | Free, once per account |
-| Further generations | `products` table, 1 / 3 / 10 packs |
-| Styles | `products` table, non-consumable unlocks |
-| Decoration (backgrounds, frames, effects, themes) | `products` table |
-| PIXME+ | Subscription; monthly credit grant + cosmetics |
+| Item | Price | Kind |
+| --- | --- | --- |
+| First generation + its retry + one bonus credit | free, once per account | — |
+| PIXME 1회 | ₩900 | consumable |
+| PIXME 3회 | ₩1,900 | consumable |
+| PIXME 10회 | ₩4,900 | consumable |
+| Styles — Y2K / 16-bit / Retro PC / Arcade / Mini / Soft | ₩2,900 each | non-consumable |
+| Decoration — backgrounds, frames, particles, nickname effects | ₩1,900 | non-consumable |
+| Decoration — animated backgrounds, poses, profile themes | ₩2,900 | non-consumable |
+| Decoration — special profile themes | ₩3,900 | non-consumable |
+| PIXME+ | ₩4,900 / month | subscription (+10 credits monthly) |
+
+Every one of these is a row in the `products` table. No price appears in either
+source tree; the app always prefers the platform store's localised price and
+uses the table value only as a fallback for the moment before the store
+answers. Repricing, a promo or a new market is a data change.
+
+### Poses and emotions do not apply in the square
+
+Selling a pose and keeping the square uniform are in tension, and the square
+wins. A purchased pose or expression changes how the character renders on **your
+own card, your profile and your pixel history** — not in the square, which is
+the one place where everyone standing the same way is the entire point. Buying
+one still has visible value; it just cannot fragment the crowd.
 
 Prices live in App Store Connect / Play Console and in the `products` table as
 a display fallback. The client always prefers the store's localised price. No
