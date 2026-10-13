@@ -13,7 +13,10 @@ import java.util.UUID;
 import app.pixme.common.Cursors;
 import app.pixme.common.ServiceClock;
 import app.pixme.config.PixmeProperties;
+import app.pixme.connection.domain.ConnectionRequest;
+import app.pixme.connection.domain.ConnectionRequestStatus;
 import app.pixme.connection.repository.ConnectionRepository;
+import app.pixme.connection.repository.ConnectionRequestRepository;
 import app.pixme.dailystatus.domain.DailyStatus;
 import app.pixme.dailystatus.repository.DailyStatusRepository;
 import app.pixme.reaction.repository.ReactionRepository;
@@ -45,6 +48,7 @@ public class FeedService {
     private final BlockRepository blockRepository;
     private final ReactionRepository reactionRepository;
     private final ConnectionRepository connectionRepository;
+    private final ConnectionRequestRepository connectionRequestRepository;
     private final UserInterestRepository userInterestRepository;
     private final UserRepository userRepository;
     private final FeedExposureRepository exposureRepository;
@@ -57,6 +61,7 @@ public class FeedService {
             BlockRepository blockRepository,
             ReactionRepository reactionRepository,
             ConnectionRepository connectionRepository,
+            ConnectionRequestRepository connectionRequestRepository,
             UserInterestRepository userInterestRepository,
             UserRepository userRepository,
             FeedExposureRepository exposureRepository,
@@ -67,6 +72,7 @@ public class FeedService {
         this.blockRepository = blockRepository;
         this.reactionRepository = reactionRepository;
         this.connectionRepository = connectionRepository;
+        this.connectionRequestRepository = connectionRequestRepository;
         this.userInterestRepository = userInterestRepository;
         this.userRepository = userRepository;
         this.exposureRepository = exposureRepository;
@@ -86,7 +92,7 @@ public class FeedService {
         LocalDate today = clock.today();
         Cursors.Keyset keyset = Cursors.decode(cursor);
 
-        List<UUID> excluded = blockRepository.findAllRelatedUserIds(viewerId);
+        List<UUID> excluded = exclusionsFor(viewerId, today);
 
         List<DailyStatus> candidates = statusRepository.findFeedCandidates(
                 today,
@@ -129,6 +135,29 @@ public class FeedService {
         return new HashSet<>(reactionRepository.findHeartedDailyStatusIds(viewerId, dailyStatusIds));
     }
 
+    /**
+     * Who this viewer must never see in "오늘", beyond themselves:
+     *
+     * <ul>
+     *   <li>blocks (either direction) — permanent, the existing rule.
+     *   <li>people already connected to — permanent. Once there's a
+     *       conversation, the feed's job (surfacing someone new) is done; the
+     *       old +8 "keep visible" boost was wrong once a wave can actually
+     *       complete a match, since it kept crowding out the whole point of
+     *       the feed with someone you no longer need to discover.
+     *   <li>people waved at today — <em>today only</em>. A wave that didn't
+     *       lead anywhere is meant to be forgettable, not a lasting block; a
+     *       different character tomorrow can still land.
+     * </ul>
+     */
+    private List<UUID> exclusionsFor(UUID viewerId, LocalDate today) {
+        Set<UUID> excluded = new HashSet<>(blockRepository.findAllRelatedUserIds(viewerId));
+        excluded.addAll(connectionRepository.findPeerIds(viewerId));
+        excluded.addAll(connectionRequestRepository.findTargetsWavedSince(
+                viewerId, today.atStartOfDay(clock.zone()).toInstant()));
+        return List.copyOf(excluded);
+    }
+
     /* ------------------------------------------------------------- context */
 
     private FeedRanker.Context buildContext(
@@ -155,10 +184,16 @@ public class FeedService {
         Set<UUID> seen = new HashSet<>(exposureRepository.findSeenDailyStatusIds(viewerId, today));
         Set<UUID> hearted = new HashSet<>(
                 reactionRepository.findHeartedDailyStatusIds(viewerId, statusIds));
-        Set<UUID> connected = new HashSet<>(connectionRepository.findPeerIds(viewerId));
 
         Set<UUID> newUsers = new HashSet<>(userRepository.findRecentlyJoinedAmong(
                 authorIds, clock.now().minus(NEW_USER_WINDOW)));
+
+        Set<UUID> wavedAtMe = new HashSet<>(
+                connectionRequestRepository
+                        .findIncoming(viewerId, ConnectionRequestStatus.REQUESTED)
+                        .stream()
+                        .map(ConnectionRequest::getFromUserId)
+                        .toList());
 
         return new FeedRanker.Context(
                 viewerId,
@@ -168,7 +203,7 @@ public class FeedService {
                 authorExposures,
                 seen,
                 hearted,
-                connected,
+                wavedAtMe,
                 newUsers);
     }
 

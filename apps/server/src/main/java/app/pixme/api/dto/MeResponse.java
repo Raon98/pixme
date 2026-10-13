@@ -28,5 +28,7 @@ public record MeResponse(
             boolean pushConnected,
             boolean pushMessage,
             boolean pushDailyReminder,
-            boolean keepOriginalPhoto) {}
+            boolean keepOriginalPhoto,
+            boolean squareVisible,
+            boolean squareOnboarded) {}
 }

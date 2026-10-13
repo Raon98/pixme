@@ -35,10 +35,19 @@ export default function GeneratingRoute() {
   }, [draft, router, start]);
 
   useEffect(() => {
-    if (state.phase === 'completed') {
-      router.replace('/create/result');
-    }
-  }, [router, state.phase]);
+    if (state.phase !== 'completed') return;
+    // The id travels with the navigation so the result screen can re-fetch on
+    // its own. It normally reads the generation straight out of the draft,
+    // but the draft is in-memory only — anything that drops or staleness it
+    // (a push tap mid-poll, the app being killed while generating) otherwise
+    // left a finished generation looking like a failed one.
+    const id = state.generation?.id;
+    router.replace(
+      id
+        ? { pathname: '/create/result', params: { generationId: id } }
+        : '/create/result',
+    );
+  }, [router, state.generation?.id, state.phase]);
 
   const failed =
     state.phase === 'failed' ||
@@ -60,6 +69,9 @@ export default function GeneratingRoute() {
                   router.replace('/create');
                   return;
                 }
+                // A second tap cannot double-charge: `start` holds an
+                // in-flight lock, and the first tap flips the phase so this
+                // whole branch unmounts on the next render.
                 started.current = false;
                 isRetry.current = true;
                 void start({ isRetry: true });
@@ -99,6 +111,16 @@ export default function GeneratingRoute() {
                 ? copy.generation.timeoutBody
                 : copy.generation.failedBody}
           </Text>
+          {!unsafe && !timedOut && state.errorMessage ? (
+            <Text
+              variant="micro"
+              tone="tertiary"
+              align="center"
+              style={styles.body}
+            >
+              DEBUG: {state.errorCode} — {state.errorMessage}
+            </Text>
+          ) : null}
         </View>
       </Screen>
     );
@@ -106,12 +128,15 @@ export default function GeneratingRoute() {
 
   return (
     <Screen>
-      <Header title={copy.generation.resultTitle} showBack={false} />
+      <Header
+        title={copy.generation.resultTitle}
+        onBack={() => router.replace('/(tabs)')}
+      />
       <View style={styles.center}>
         <GenerationStages progress={state.progress} />
       </View>
       <Text variant="micro" tone="tertiary" align="center" style={styles.footnote}>
-        창을 닫아도 생성은 계속돼요. 완성되면 알림으로 알려드릴게요.
+        {copy.generation.backgroundNotice}
       </Text>
     </Screen>
   );

@@ -197,12 +197,14 @@ class FeedRankerTest {
                 null,
                 null,
                 null,
-                new PixmeProperties.Generation(1, 20, 10),
+                new PixmeProperties.Generation(1, 20, 10, 2000),
                 new PixmeProperties.Feed(10, 2, 0.2),
                 new PixmeProperties.Square(40, 1000, 1400, 92, 8),
                 new PixmeProperties.Push(null, null, false),
                 null,
                 null,
-                new PixmeProperties.RateLimit(10, 60, 60, 60, 20));
+                new PixmeProperties.RateLimit(10, 60, 60, 60, 20),
+                new PixmeProperties.Connection(2, 5),
+                null);
     }
 }

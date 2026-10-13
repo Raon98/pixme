@@ -68,13 +68,17 @@ public class S3StorageService implements StorageService {
     public PresignedUpload presignOriginalUpload(UUID userId, String mimeType, Duration ttl) {
         String objectKey = originalKey(userId, mimeType);
 
+        // Deliberately not signing content-type or acl: R2 has no ACL concept
+        // (objects are private by default, this bucket has no public access
+        // configured), and signing content-type requires the client's PUT to
+        // echo it byte-for-byte — mobile HTTP stacks (React Native's fetch in
+        // particular) can silently rewrite that header, which produces a
+        // SignatureDoesNotMatch that has nothing to do with the credentials.
+        // Fewer signed headers means fewer ways for the client to break the
+        // signature; "host" alone is enough.
         PutObjectRequest request = PutObjectRequest.builder()
                 .bucket(config.originalsBucket())
                 .key(objectKey)
-                .contentType(mimeType)
-                // Belt and braces: even if a bucket policy were misconfigured,
-                // the object itself is written private.
-                .acl("private")
                 .build();
 
         var presigned = presigner.presignPutObject(PutObjectPresignRequest.builder()
@@ -82,10 +86,7 @@ public class S3StorageService implements StorageService {
                 .putObjectRequest(request)
                 .build());
 
-        return new PresignedUpload(
-                objectKey,
-                presigned.url().toString(),
-                Map.of("Content-Type", mimeType, "x-amz-acl", "private"));
+        return new PresignedUpload(objectKey, presigned.url().toString(), Map.of());
     }
 
     @Override

@@ -1,0 +1,8 @@
+{
+  "CFBundleDisplayName": "PIXME",
+  "NSCameraUsageDescription": "오늘의 PIXME 캐릭터를 만들기 위해 사진을 촬영합니다.",
+  "NSPhotoLibraryUsageDescription": "오늘의 PIXME 캐릭터를 만들기 위해 사진을 선택합니다.",
+  "NSPhotoLibraryAddUsageDescription": "만들어진 PIXME 캐릭터를 사진에 저장합니다.",
+  "NSMicrophoneUsageDescription": "사용하지 않습니다.",
+  "NSUserTrackingUsageDescription": "이 앱은 이용자를 추적하지 않습니다."
+}

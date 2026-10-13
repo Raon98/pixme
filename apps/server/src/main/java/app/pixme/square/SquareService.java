@@ -14,6 +14,8 @@ import java.util.UUID;
 
 import app.pixme.common.ServiceClock;
 import app.pixme.config.PixmeProperties;
+import app.pixme.connection.repository.ConnectionRepository;
+import app.pixme.connection.repository.ConnectionRequestRepository;
 import app.pixme.dailystatus.domain.DailyStatus;
 import app.pixme.dailystatus.repository.DailyStatusRepository;
 import app.pixme.pixel.domain.PixelCharacter;
@@ -30,6 +32,10 @@ import app.pixme.user.domain.UserSettings;
 import app.pixme.user.domain.UserStatus;
 import app.pixme.user.repository.UserRepository;
 import app.pixme.user.repository.UserSettingsRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,13 +62,41 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SquareService {
 
+    private static final Logger log = LoggerFactory.getLogger(SquareService.class);
+
     /** "Active now" window for the 지금 활동 중 rail. */
     private static final Duration ACTIVE_WINDOW = Duration.ofMinutes(30);
+
+    /**
+     * How often the visible subset rotates on a day the square is over
+     * capacity. An hour, not a refresh-to-refresh shuffle: the square must
+     * still look the same to everyone looking at it right now — see the
+     * class-level note about a stable arrangement — this only changes who
+     * that arrangement includes, and only between hours.
+     */
+    private static final int ROTATION_WINDOW_HOURS = 1;
+
+    /**
+     * Hard ceiling on how many presence rows a single read loads before
+     * rotation selection runs — not the visible capacity (that is
+     * {@code properties.square().pageSize()}), just a guard against an
+     * unbounded query if presence volume is ever far beyond anything the UI
+     * is designed for.
+     */
+    private static final int PRESENCE_FETCH_CEILING = 2000;
+
+    /**
+     * Depth is meaningless for a prop exclusion point — it only ever feeds the
+     * allocator's distance check, never gets persisted or rendered.
+     */
+    private static final short PROP_EXCLUSION_DEPTH = 0;
 
     private final SquarePresenceRepository presenceRepository;
     private final SquarePlacementRepository placementRepository;
     private final SquareSceneRepository sceneRepository;
     private final BlockRepository blockRepository;
+    private final ConnectionRepository connectionRepository;
+    private final ConnectionRequestRepository connectionRequestRepository;
     private final UserRepository userRepository;
     private final UserSettingsRepository settingsRepository;
     private final UserCurrentPixelRepository currentPixelRepository;
@@ -71,12 +105,15 @@ public class SquareService {
     private final SquarePlacementAllocator allocator;
     private final ServiceClock clock;
     private final PixmeProperties properties;
+    private final ObjectMapper objectMapper;
 
     public SquareService(
             SquarePresenceRepository presenceRepository,
             SquarePlacementRepository placementRepository,
             SquareSceneRepository sceneRepository,
             BlockRepository blockRepository,
+            ConnectionRepository connectionRepository,
+            ConnectionRequestRepository connectionRequestRepository,
             UserRepository userRepository,
             UserSettingsRepository settingsRepository,
             UserCurrentPixelRepository currentPixelRepository,
@@ -84,11 +121,15 @@ public class SquareService {
             DailyStatusRepository statusRepository,
             SquarePlacementAllocator allocator,
             ServiceClock clock,
-            PixmeProperties properties) {
+            PixmeProperties properties,
+            ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
         this.presenceRepository = presenceRepository;
         this.placementRepository = placementRepository;
         this.sceneRepository = sceneRepository;
         this.blockRepository = blockRepository;
+        this.connectionRepository = connectionRepository;
+        this.connectionRequestRepository = connectionRequestRepository;
         this.userRepository = userRepository;
         this.settingsRepository = settingsRepository;
         this.currentPixelRepository = currentPixelRepository;
@@ -126,16 +167,29 @@ public class SquareService {
                 : Math.min(requestedLimit, 80);
 
         LocalDate today = clock.today();
-        List<UUID> excluded = blockRepository.findAllRelatedUserIds(viewerId);
+        // Same exclusion set as the feed — blocks, people already connected
+        // to (the square's job is to surface who's around, not to keep
+        // re-showing someone you already have a conversation with), and
+        // today's unmatched waves (forgettable, not a lasting block). See
+        // FeedService#exclusionsFor for the full rationale.
+        Set<UUID> excludedSet = new HashSet<>(blockRepository.findAllRelatedUserIds(viewerId));
+        excludedSet.addAll(connectionRepository.findPeerIds(viewerId));
+        excludedSet.addAll(connectionRequestRepository.findTargetsWavedSince(
+                viewerId, today.atStartOfDay(clock.zone()).toInstant()));
+        List<UUID> excluded = List.copyOf(excludedSet);
         boolean excludedIsEmpty = excluded.isEmpty();
         List<UUID> excludedOrPlaceholder = excludedIsEmpty ? List.of(viewerId) : excluded;
 
-        List<SquarePresence> presences = presenceRepository.findOccupants(
-                today, excludedOrPlaceholder, excludedIsEmpty, PageRequest.of(0, limit));
+        List<SquarePresence> eligible = presenceRepository.findOccupants(
+                today, excludedOrPlaceholder, excludedIsEmpty,
+                PageRequest.of(0, PRESENCE_FETCH_CEILING));
+        List<SquarePresence> presences = rotateToCapacity(eligible, today, limit, viewerId);
 
-        List<Occupant> occupants = withPlacements(today, presences);
+        // Resolved before placement so a brand-new placement today can steer
+        // clear of this scene's furniture — see withPlacements.
         SquareScene scene = resolveScene();
-        List<Curation> curations = buildCurations(today, excludedOrPlaceholder, excludedIsEmpty);
+        List<Occupant> occupants = withPlacements(today, presences, scene);
+        List<Curation> curations = buildCurations(today, excludedOrPlaceholder, excludedIsEmpty, scene);
 
         return new SquareView(scene, occupants, curations, occupants.size());
     }
@@ -181,6 +235,83 @@ public class SquareService {
                 .orElseGet(() -> scenes.isEmpty() ? null : scenes.get(scenes.size() - 1));
     }
 
+    /**
+     * Picks who's visible when a day's presence exceeds capacity.
+     *
+     * <p>Without this, {@code order by enteredAt asc} plus a row limit means
+     * whoever opted in earliest in the day occupies every slot permanently —
+     * anyone who shows up after the square fills never appears at all, for
+     * the rest of that day. Instead: under capacity, everyone is shown, same
+     * as before. Over capacity, the visible set is a deterministic hash of
+     * (day, hour, userId), so it is identical for every viewer within one
+     * hour — no refresh-to-refresh shuffle — and changes composition at the
+     * next hour boundary, so staying present long enough eventually gets
+     * everyone a turn instead of locking out everyone after the first
+     * {@code pageSize}.
+     *
+     * <p>The viewer's own presence is exempted from rotation — standing in a
+     * square that sometimes doesn't show you *your own self* reads as broken,
+     * not as fair rotation, so "everyone gets a turn" applies to everyone
+     * else's turn, never to whether you can find yourself.
+     */
+    private List<SquarePresence> rotateToCapacity(
+            List<SquarePresence> eligible, LocalDate today, int limit, UUID viewerId) {
+        if (eligible.size() <= limit) {
+            return eligible;
+        }
+
+        int hourBucket = clock.localNow().getHour() / ROTATION_WINDOW_HOURS;
+        long seed = today.toEpochDay() * 31L + hourBucket;
+
+        SquarePresence self = null;
+        List<SquarePresence> others = new ArrayList<>(eligible.size());
+        for (SquarePresence presence : eligible) {
+            if (presence.getUserId().equals(viewerId)) {
+                self = presence;
+            } else {
+                others.add(presence);
+            }
+        }
+
+        others.sort(Comparator.comparingLong(
+                presence -> rotationKey(seed, presence.getUserId())));
+
+        int remaining = self != null ? limit - 1 : limit;
+        List<SquarePresence> result = new ArrayList<>(limit);
+        if (self != null) {
+            result.add(self);
+        }
+        result.addAll(others.subList(0, Math.min(remaining, others.size())));
+        return result;
+    }
+
+    /** A presence's sort key for one rotation window — stable, not sequential. */
+    private long rotationKey(long seed, UUID userId) {
+        long mixed = seed ^ userId.getMostSignificantBits() ^ userId.getLeastSignificantBits();
+        // SplitMix64 finalizer: cheap, well-distributed, no java.util.Random
+        // instance to allocate per row.
+        mixed = (mixed ^ (mixed >>> 30)) * 0xbf58476d1ce4e5b9L;
+        mixed = (mixed ^ (mixed >>> 27)) * 0x94d049bb133111ebL;
+        return mixed ^ (mixed >>> 31);
+    }
+
+    /** Scene furniture coordinates, as exclusion points for the allocator. */
+    private List<SquarePlacementAllocator.Point> propPoints(SquareScene scene) {
+        if (scene == null) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(scene.getPropsJson());
+            List<SquarePlacementAllocator.Point> points = new ArrayList<>(node.size());
+            node.forEach(prop -> points.add(new SquarePlacementAllocator.Point(
+                    prop.path("x").asInt(), prop.path("y").asInt(), PROP_EXCLUSION_DEPTH)));
+            return points;
+        } catch (Exception exception) {
+            log.warn("could not parse scene props for placement exclusion", exception);
+            return List.of();
+        }
+    }
+
     /* ---------------------------------------------------------- resolution */
 
     /**
@@ -188,7 +319,8 @@ public class SquareService {
      * are new since the last read, and resolves each one's live Current PIXME
      * and today's status alongside it.
      */
-    private List<Occupant> withPlacements(LocalDate today, List<SquarePresence> presences) {
+    private List<Occupant> withPlacements(
+            LocalDate today, List<SquarePresence> presences, SquareScene scene) {
         if (presences.isEmpty()) {
             return List.of();
         }
@@ -217,6 +349,13 @@ public class SquareService {
 
         List<SquarePlacement> allToday = placementRepository.findByKeyPresenceDateOrderByYAsc(today);
         List<SquarePlacementAllocator.Point> taken = new ArrayList<>(allocator.toPoints(allToday));
+        // So a brand-new placement lands clear of the tree/bench/sign the
+        // scene is dressed with, rather than landing on top of one and
+        // getting drawn under it. Placements already saved from an earlier
+        // scene (e.g. before a day→night switch) aren't retroactively moved —
+        // they stay stable by design — so the client additionally renders
+        // every occupant above scene props regardless, as the real guarantee.
+        taken.addAll(propPoints(scene));
 
         List<Occupant> occupants = new ArrayList<>(presences.size());
         for (SquarePresence presence : presences) {
@@ -275,13 +414,13 @@ public class SquareService {
      * </ul>
      */
     private List<Curation> buildCurations(
-            LocalDate today, List<UUID> excluded, boolean excludedIsEmpty) {
+            LocalDate today, List<UUID> excluded, boolean excludedIsEmpty, SquareScene scene) {
 
         int size = properties.square().curationSize();
         var page = PageRequest.of(0, size * 4);
 
         List<SquarePresence> pool = presenceRepository.findOccupants(today, excluded, excludedIsEmpty, page);
-        List<Occupant> candidates = withPlacements(today, pool);
+        List<Occupant> candidates = withPlacements(today, pool, scene);
 
         Set<UUID> featured = new HashSet<>();
         List<Curation> curations = new ArrayList<>(4);
@@ -294,7 +433,7 @@ public class SquareService {
                 .limit(size)
                 .toList();
         if (!hearted.isEmpty()) {
-            curations.add(new Curation(CurationCode.HEARTS, "🔥 오늘 많이 받은 하트", hearted));
+            curations.add(new Curation(CurationCode.HEARTS, "🔥 오늘 좋아요를 많이 받은", hearted));
         }
 
         /* ✨ 지금 막 도착했어요 */

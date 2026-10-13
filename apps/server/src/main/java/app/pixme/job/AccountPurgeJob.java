@@ -12,7 +12,10 @@ import app.pixme.pixel.repository.PixelCharacterRepository;
 import app.pixme.pixel.repository.PixelGenerationRepository;
 import app.pixme.pixel.repository.PixelUploadRepository;
 import app.pixme.storage.StorageService;
+import app.pixme.user.IdentityFingerprint;
+import app.pixme.user.domain.DeletedAccountFingerprint;
 import app.pixme.user.domain.User;
+import app.pixme.user.repository.DeletedAccountFingerprintRepository;
 import app.pixme.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +51,7 @@ public class AccountPurgeJob {
     private final NotificationService notificationService;
     private final StorageService storage;
     private final PixmeProperties properties;
+    private final DeletedAccountFingerprintRepository fingerprintRepository;
 
     public AccountPurgeJob(
             UserRepository userRepository,
@@ -58,7 +62,8 @@ public class AccountPurgeJob {
             ConnectionService connectionService,
             NotificationService notificationService,
             StorageService storage,
-            PixmeProperties properties) {
+            PixmeProperties properties,
+            DeletedAccountFingerprintRepository fingerprintRepository) {
         this.userRepository = userRepository;
         this.characterRepository = characterRepository;
         this.generationRepository = generationRepository;
@@ -68,6 +73,7 @@ public class AccountPurgeJob {
         this.notificationService = notificationService;
         this.storage = storage;
         this.properties = properties;
+        this.fingerprintRepository = fingerprintRepository;
     }
 
     @Scheduled(cron = "0 0 5 * * *")
@@ -111,7 +117,18 @@ public class AccountPurgeJob {
         chatService.purgeForUser(userId);
         notificationService.removeAllTokens(userId);
 
-        // 3. The account row. Every satellite table cascades from here, which
+        // 3. A fingerprint of who this *was*, so a re-signup with the same
+        //    social identity after this point does not get onboarding's free
+        //    generation and retry all over again. Written before the delete,
+        //    in the same transaction, so a crash between the two never leaves
+        //    a purged account without its fingerprint recorded.
+        String hash = IdentityFingerprint.of(user.getProvider().name(), user.getProviderUserId());
+        if (!fingerprintRepository.existsByIdentityHash(hash)) {
+            fingerprintRepository.save(
+                    DeletedAccountFingerprint.of(hash, user.getProvider().name()));
+        }
+
+        // 4. The account row. Every satellite table cascades from here, which
         //    is why the FKs are declared ON DELETE CASCADE.
         userRepository.delete(user);
         log.info("hard-deleted account user={}", userId);

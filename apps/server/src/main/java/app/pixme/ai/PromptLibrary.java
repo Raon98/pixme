@@ -136,13 +136,15 @@ public class PromptLibrary {
                shoes.
 
                From Image B, strictly preserve the body proportions, head-to-body ratio,
-               character scale, pixel density, the degree to which facial features are
-               simplified, the silhouette, the standing pose and the overall visual
-               language.
+               character scale, the degree to which facial features are simplified, the
+               silhouette and the standing pose.
 
-               The result must look like the exact same PIXME avatar system with only
-               the person and the outfit changed. Style consistency is more important
-               than creative variation. Do not create a new character style.
+               Image B does NOT govern colour, palette size, shading technique, outline
+               treatment or pixel density. Those are set by the STYLE section below, and
+               where the style section and Image B disagree, the style section wins.
+
+               The result must be the same PIXME avatar system — same build, same
+               framing, same level of simplification — rendered in the requested style.
                """;
     }
 
@@ -152,7 +154,9 @@ public class PromptLibrary {
      */
     private String construction(CharacterSpec spec, boolean hasMasterReference) {
         return """
-               PIXME construction — identical for every character, never varied:
+               PIXME construction — the build of the character, identical for every
+               character. (Colour, palette, shading and outline are NOT part of this
+               and are set by the STYLE section.)
                - One single character, full body, front-facing (or very slightly
                  turned), relaxed standing pose, arms down at the sides, hands may rest
                  in pockets.
@@ -163,9 +167,9 @@ public class PromptLibrary {
                  margin of empty space above the hair.
                - Clean, deliberate pixel edges on one consistent grid. No anti-aliasing,
                  no blur, no soft gradients.
-               - Limited palette per garment with simple shading for folds and volume,
-                 plus a darker outline on the silhouette. Shading is restrained: it
-                 describes form, it does not become painting.
+               - Shading describes form; it never becomes painting. How many shading
+                 steps, which palette and whether the silhouette carries an outline are
+                 decided by the STYLE section, not here.
                - Large, expressive pixel eyes with a single bright highlight; soft brows;
                  a small simple mouth; subtle cheek blush. The nose is minimal or
                  omitted. This is the simplification LEVEL — the SHAPE of each feature
@@ -174,9 +178,15 @@ public class PromptLibrary {
                  crowd and about 300px tall on its own card.
 
                Output:
-               - One centered full-body pixel character on a FULLY TRANSPARENT
-                 background.
-               - No ground shadow, no backdrop, no frame, no text, no watermark, no UI.%s
+               - One centered full-body pixel character. Every pixel outside the
+                 character's silhouette must be fully transparent (alpha = 0) —
+                 flat, uniform transparency, the same everywhere behind the
+                 character, not a gradient and not fading toward any colour.
+               - No ground shadow, no backdrop, no frame, no text, no watermark, no UI,
+                 no vignette, no glow, no spotlight, no ambient colour wash. The
+                 character must be swappable onto any background later, which only
+                 works if the area behind it is genuinely empty, not painted to
+                 look empty.%s
 
                Never produce:
                - photorealism, 3D render, or lighting simulation
@@ -184,6 +194,9 @@ public class PromptLibrary {
                - exaggerated chibi proportions (huge head, tiny stub body)
                - any recognisable existing game, film or brand character
                - multiple characters, a scene, or props the person is not carrying
+               - any vignette, glow, spotlight, radial gradient, soft-fade halo or
+                 ambient colour behind the character — that space must be pure
+                 transparent pixels, not a dark or coloured fade
                """
                 .formatted(
                         spec.headRatio() * 100,
@@ -198,29 +211,123 @@ public class PromptLibrary {
                                 : "");
     }
 
+    /**
+     * How the character is rendered, as opposed to how it is built.
+     *
+     * <p>Stated at length and in concrete terms on purpose. A one-line hint
+     * ("higher saturation") loses to the reference contract and the
+     * construction block, which are long, numeric and repeated — the paid
+     * styles then all came out looking like the house style, which is the one
+     * outcome that makes them not worth buying. Each style names the palette,
+     * the shading steps and the outline explicitly so there is nothing left to
+     * infer.
+     */
+    /**
+     * The boundary around {@link #styleModifier}.
+     *
+     * <p>The style sections are written to be loud, because quiet ones lost to
+     * the construction block and every paid style came out looking like the
+     * house style. Loud has a cost: the model started treating "Y2K" or
+     * "arcade" as licence to dress the character for that era — swapping the
+     * top, adding a jacket, restyling the hair — so the buyer got someone
+     * else's outfit rather than their own in a different rendering. This says,
+     * in the same register, exactly how far the style reaches: the technique
+     * of drawing, never the subject being drawn.
+     */
+    private static final String STYLE_SCOPE =
+            """
+            SCOPE OF THE STYLE SECTION — read this as a hard limit:
+
+            The style controls ONLY how the character is drawn: palette depth,
+            number of shading steps, dithering, outline treatment, pixel density
+            and overall colour treatment.
+
+            The style NEVER controls what the character is wearing or what their
+            hair looks like. Specifically, the style section may not:
+            - add, remove, swap or substitute any garment, including jackets,
+              overshirts, hoodies, scarves, hats or jewellery;
+            - change a garment's type, cut, length, fit, layering or pattern;
+            - change the hairstyle, hair length, fringe, parting or hair colour;
+            - add era-appropriate or genre-appropriate clothing of any kind.
+
+            Hair and clothing come from Image A and the written description
+            below, and nothing in the style section overrides them. Apply the
+            style to the person as they actually are: same hair, same clothes,
+            drawn differently.""";
+
     private String styleModifier(PixelStyle style) {
         return switch (style) {
             case PIXME_BASIC ->
-                    "Style: the PIXME house style exactly as shown in the Master Character "
-                            + "Reference. Do not deviate.";
+                    """
+                    STYLE — PIXME house style:
+                    - Render exactly as shown in the Master Character Reference.
+                    - Limited palette per garment, two shading steps, a darker outline
+                      on the silhouette. Restrained and clean.""";
             case Y2K_PIXEL ->
-                    "Style variation: Y2K. Higher saturation, slightly glossy highlights, "
-                            + "cool metallic accents. Construction and proportions unchanged.";
+                    """
+                    STYLE — Y2K (this must be obvious at a glance):
+                    - Vivid, high-saturation colours; push every garment colour well
+                      past its real-life saturation.
+                    - Glossy specular highlights: a bright, near-white hard-edged
+                      highlight on hair, shoulders, bag and shoes.
+                    - Cool chrome/silver and candy-pink or electric-blue tint on trims,
+                      buckles and small details that are already there. Do not add trims,
+                      buckles or details the photo does not show.
+                    - Crisp dark outline kept.
+                    - Construction and proportions unchanged.""";
             case BIT_16 ->
-                    "Style variation: 16-bit. One extra shading step per garment, richer "
-                            + "mid-tones. Construction and proportions unchanged.";
+                    """
+                    STYLE — 16-bit console art (this must be obvious at a glance):
+                    - Four to five shading steps per garment instead of two: deep
+                      shadow, shadow, base, light, highlight.
+                    - Rich saturated mid-tones, dithered transitions between steps on
+                      large surfaces.
+                    - Visibly denser pixel detail: fabric folds, seams and hair strands
+                      picked out individually.
+                    - Crisp dark outline kept.
+                    - Construction and proportions unchanged.""";
             case RETRO_PC ->
-                    "Style variation: early PC display. Restricted 16-colour palette, "
-                            + "visible colour banding. Construction and proportions unchanged.";
+                    """
+                    STYLE — early home computer (this must be obvious at a glance):
+                    - Hard-restricted 16-colour EGA/CGA-like palette. Snap every colour
+                      in the photo to its nearest member of that small palette, even
+                      when the result is visibly "wrong".
+                    - Flat blocky colour fields with ordered/checkerboard dithering
+                      instead of smooth shading. Visible colour banding is wanted.
+                    - Slightly coarser pixel grid, as if drawn at low resolution.
+                    - Crisp dark outline kept.
+                    - Construction and proportions unchanged.""";
             case ARCADE ->
-                    "Style variation: arcade. High contrast, strong outline, punchy "
-                            + "primaries. Construction and proportions unchanged.";
+                    """
+                    STYLE — arcade cabinet sprite (this must be obvious at a glance):
+                    - Punchy primary colours, maximum contrast between light and shadow,
+                      no muted tones.
+                    - Thick, heavy black outline around the whole silhouette and around
+                      each major garment block.
+                    - Bold simplified shapes; small detail dropped rather than softened.
+                    - Construction and proportions unchanged.""";
             case MINI_PIXEL ->
-                    "Style variation: mini pixel. Coarser grid, rounder shapes, fewer "
-                            + "pixels per limb. Construction and proportions unchanged.";
+                    """
+                    STYLE — mini pixel (this must be obvious at a glance):
+                    - Noticeably coarser pixel grid: each pixel block is roughly twice
+                      the size used in the reference, so the whole character reads as
+                      lower resolution.
+                    - Rounder, chunkier shapes; fewer pixels per limb; fine detail
+                      merged into solid blocks.
+                    - Flat colour with a single shading step.
+                    - Crisp dark outline kept.
+                    - Construction and proportions unchanged.""";
             case SOFT_PIXEL ->
-                    "Style variation: soft pixel. Pastel palette, low contrast, no hard "
-                            + "black outline. Construction and proportions unchanged.";
+                    """
+                    STYLE — soft pixel (this must be obvious at a glance):
+                    - Pastel, desaturated palette throughout: milky, chalky versions of
+                      the photo's colours.
+                    - Low contrast between base and shadow; shadows are a gentle tint of
+                      the base colour, never grey or black.
+                    - NO black or dark outline anywhere. Where an outline is needed for
+                      readability use a slightly darker shade of the adjacent colour.
+                      This overrides any outline instruction above.
+                    - Construction and proportions unchanged.""";
         };
     }
 
@@ -239,6 +346,7 @@ public class PromptLibrary {
         sections.add(referenceContract(hasMasterReference).strip());
         sections.add(construction(spec, hasMasterReference).strip());
         sections.add(styleModifier(style));
+        sections.add(STYLE_SCOPE);
         sections.add("Reproduce this exact person and outfit:");
 
         if (analysis.hair() != null) {
@@ -310,12 +418,32 @@ public class PromptLibrary {
                 simplified into pixels but not substituted.
 
                 Priority if anything conflicts: PIXME construction and proportions
-                first, then garment identity and colour, then facial likeness, then
-                hair, then accessories, then mood. Do not improve, restyle or
-                accessorise the outfit — it must stay the clothes this person actually
-                wore today.
+                first, then garment identity (what each item *is*), then the STYLE
+                section's palette, shading and outline treatment, then colour fidelity
+                within that palette, then facial likeness, then hair, then accessories,
+                then mood. Do not improve, restyle or accessorise the outfit — it must
+                stay the clothes this person actually wore today.
+
+                Final check before output: the pixels behind the character must be
+                fully transparent, with no vignette, glow or colour fade of any kind.
                 """
                         .strip());
+
+        // Restated last on purpose: everything between here and the style
+        // section argues for consistency, and whichever instruction the model
+        // read most recently tends to win. Without this the paid styles came
+        // out indistinguishable from the house style.
+        sections.add("Render the character in this style, and make the difference "
+                + "unmistakable:\n" + styleModifier(style));
+
+        // And immediately after it, the limit — for the same recency reason.
+        // Restating the style last made it win; restating it last *without*
+        // this made it win too broadly, and the model redressed the character
+        // to suit the style instead of only redrawing them in it.
+        sections.add(
+                "The style above changes only how this is drawn. The hair and every "
+                        + "garment stay exactly as described from the photo — same "
+                        + "hairstyle, same clothes, nothing added, nothing swapped.");
 
         return String.join("\n\n", sections);
     }

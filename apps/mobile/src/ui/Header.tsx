@@ -2,6 +2,7 @@ import React from 'react';
 import { type StyleProp, StyleSheet, View, type ViewStyle } from 'react-native';
 import { useRouter } from 'expo-router';
 
+import { copy } from '@/constants/copy';
 import { layout, spacing, useTheme } from '@/theme';
 
 import { Icon } from './Icon';
@@ -54,7 +55,7 @@ export function Header({
     <View style={[styles.root, style]}>
       <View style={styles.side}>
         {showBack ? (
-          <IconButton label="뒤로" onPress={handleBack} size={36}>
+          <IconButton label={copy.a11y.back} onPress={handleBack} size={36}>
             <Icon name="chevron-left" size={22} color={colors.text} />
           </IconButton>
         ) : null}

@@ -1,5 +1,12 @@
 import { useCallback } from 'react';
-import { Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { copy } from '@/constants/copy';
@@ -135,7 +142,9 @@ export default function PlusRoute() {
           </Text>
           {plusActive && user?.entitlements.plusExpiresAt ? (
             <Text variant="micro" tone="accent" style={styles.active}>
-              {user.entitlements.plusExpiresAt.slice(0, 10)}까지 이용 중
+              {copy.plus.activeUntil(
+                user.entitlements.plusExpiresAt.slice(0, 10),
+              )}
             </Text>
           ) : null}
         </View>
@@ -157,18 +166,29 @@ export default function PlusRoute() {
         </View>
 
         <Text variant="micro" tone="tertiary" style={styles.note}>
-          PIXME+는 자기표현을 넓히는 구독이에요. 하트, 친해지고 싶어요, 연결,
-          대화 같은 관계 기능은 구독과 무관하게 모두에게 무료예요.
+          {copy.plus.note}
         </Text>
 
-        <Text
-          variant="micro"
-          tone="secondary"
-          style={styles.terms}
-          onPress={() => void Linking.openURL(config.links.terms)}
-        >
-          {copy.settings.terms}
-        </Text>
+        <View style={styles.legalLinks}>
+          <Pressable
+            hitSlop={12}
+            accessibilityRole="link"
+            onPress={() => void Linking.openURL(config.links.terms)}
+          >
+            <Text variant="micro" tone="secondary" style={styles.legalLink}>
+              {copy.settings.terms}
+            </Text>
+          </Pressable>
+          <Pressable
+            hitSlop={12}
+            accessibilityRole="link"
+            onPress={() => void Linking.openURL(config.links.privacy)}
+          >
+            <Text variant="micro" tone="secondary" style={styles.legalLink}>
+              {copy.settings.privacy}
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
     </Screen>
   );
@@ -192,6 +212,13 @@ const styles = StyleSheet.create({
   benefitText: { flex: 1 },
   benefitDesc: { marginTop: spacing.xxs },
   note: { marginTop: spacing.lg },
-  terms: { marginTop: spacing.base, textDecorationLine: 'underline' },
   legal: { marginTop: spacing.sm },
+  // Apple requires an auto-renewable subscription screen to link both the
+  // terms and the privacy policy, not just one.
+  legalLinks: {
+    flexDirection: 'row',
+    gap: spacing.base,
+    marginTop: spacing.base,
+  },
+  legalLink: { textDecorationLine: 'underline' },
 });

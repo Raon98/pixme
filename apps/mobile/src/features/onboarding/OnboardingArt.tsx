@@ -1,7 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import { radius, spacing, useTheme } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Icon } from '@/ui';
 
 /**
  * Onboarding illustrations.
@@ -59,7 +59,7 @@ export function OnboardingArt({ index }: { index: number }) {
               },
             ]}
           >
-            <Text style={styles.glyph}>👾</Text>
+            <Icon name="user" size={26} color={colors.textTertiary} />
           </View>
         ))}
       </View>
@@ -114,7 +114,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginHorizontal: spacing.xs,
   },
-  glyph: { fontSize: 34 },
   reaction: {
     width: 76,
     height: 76,

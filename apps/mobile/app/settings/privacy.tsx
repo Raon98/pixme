@@ -5,7 +5,9 @@ import { copy } from '@/constants/copy';
 import { config } from '@/lib/config';
 import { radius, spacing, useTheme } from '@/theme';
 import {
+  ErrorState,
   Header,
+  ListSkeleton,
   ListRow,
   Screen,
   SectionHeader,
@@ -19,8 +21,8 @@ import { useMe, useUpdateMe } from '@/features/profile/useProfile';
  * Privacy controls.
  *
  * The original photo is the most sensitive thing PIXME ever holds, so the user
- * gets a direct switch for it. With "원본 사진 보관" off, the server deletes
- * the original as soon as the character is generated — the character and the
+ * gets a direct switch for it. With `settings.keepOriginal` off, the server
+ * deletes the original as soon as the character is generated — the character and the
  * record survive, the photo does not.
  */
 export default function PrivacySettingsRoute() {
@@ -41,8 +43,8 @@ export default function PrivacySettingsRoute() {
           onSuccess: () =>
             toast.show({
               message: next
-                ? '원본 사진을 보관해요.'
-                : '앞으로 원본 사진은 생성 직후 삭제돼요.',
+                ? copy.settings.keepOriginalOn
+                : copy.settings.keepOriginalOff,
               tone: 'success',
             }),
           onError: () =>
@@ -61,8 +63,8 @@ export default function PrivacySettingsRoute() {
           onSuccess: () =>
             toast.show({
               message: next
-                ? '오늘 활동하면 광장에 나타나요.'
-                : '더 이상 광장에 나타나지 않아요.',
+                ? copy.settings.squareVisibleOn
+                : copy.settings.squareVisibleOff,
               tone: 'success',
             }),
           onError: () =>
@@ -73,18 +75,40 @@ export default function PrivacySettingsRoute() {
     [toast, updateMe],
   );
 
+  // A switch bound to server state must not render before that state
+  // arrives: while loading it would show a default that can be the opposite
+  // of the truth, and a tap would then write the wrong value. On error it
+  // would read as "everything is off" rather than "we couldn't load this".
+  if (me.isPending && !me.data) {
+    return (
+      <Screen edges={['top']}>
+        <Header title={copy.settings.privacySection} />
+        <ListSkeleton />
+      </Screen>
+    );
+  }
+
+  if (me.isError && !me.data) {
+    return (
+      <Screen edges={['top']}>
+        <Header title={copy.settings.privacySection} />
+        <ErrorState error={me.error} onRetry={() => void me.refetch()} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen edges={['top']} scroll>
-      <Header title="개인정보" />
+      <Header title={copy.settings.privacySection} />
 
-      <SectionHeader title="광장" />
+      <SectionHeader title={copy.square.tabTitle} />
       <ListRow
-        title="오늘 광장에 표시"
-        subtitle="켜두면 오늘 활동할 때 광장에 내 Current PIXME가 나타나요. 끄면 앱은 평소처럼 쓸 수 있고, 광장에만 보이지 않아요."
+        title={copy.settings.squareVisible}
+        subtitle={copy.settings.squareVisibleHint}
         showChevron={false}
         right={
           <Toggle
-            label="오늘 광장에 표시"
+            label={copy.settings.squareVisible}
             value={squareVisible}
             disabled={!me.data || updateMe.isPending}
             onChange={onToggleSquareVisible}
@@ -92,7 +116,7 @@ export default function PrivacySettingsRoute() {
         }
       />
 
-      <SectionHeader title="사진" />
+      <SectionHeader title={copy.settings.photosSection} />
       <ListRow
         title={copy.settings.keepOriginal}
         subtitle={copy.settings.keepOriginalHint}
@@ -114,22 +138,20 @@ export default function PrivacySettingsRoute() {
         ]}
       >
         <Text variant="label" tone="secondary">
-          PIXME가 사진을 다루는 방식
+          {copy.settings.photoPolicyTitle}
         </Text>
         <Text variant="caption" tone="secondary" style={styles.infoLine}>
-          · 원본 사진은 비공개 저장소에 올라가고, 다른 사용자에게는 어떤 경우에도
-          보이지 않아요.
+          · {copy.settings.photoPolicyPrivate}
         </Text>
         <Text variant="caption" tone="secondary" style={styles.infoLine}>
-          · 캐릭터를 만드는 데 필요한 범위에서만 사용하고, 위치 정보 같은 사진
-          메타데이터는 올리기 전에 지워요.
+          · {copy.settings.photoPolicyScope}
         </Text>
         <Text variant="caption" tone="secondary" style={styles.infoLine}>
-          · 내 기록에서 원본을 개별 삭제할 수 있고, 계정을 삭제하면 모두 지워져요.
+          · {copy.settings.photoPolicyDelete}
         </Text>
       </View>
 
-      <SectionHeader title="약관" />
+      <SectionHeader title={copy.settings.termsSection} />
       <ListRow
         title={copy.settings.privacy}
         icon="shield"

@@ -158,7 +158,7 @@ public class GenerationService {
             return existing.get();
         }
 
-        rateLimiter.check(
+        rateLimiter.checkOrRefuse(
                 "generation",
                 userId,
                 properties.rateLimit().generationPerHour(),
@@ -178,6 +178,7 @@ public class GenerationService {
         if (todayCount >= properties.generation().maxPerDay()) {
             throw new ApiException(ErrorCode.DAILY_GENERATION_LIMIT);
         }
+        requireGlobalCapacity(today);
 
         PixelGeneration generation = PixelGeneration.create(
                 userId,
@@ -234,7 +235,7 @@ public class GenerationService {
             return existing.get();
         }
 
-        rateLimiter.check(
+        rateLimiter.checkOrRefuse(
                 "generation",
                 userId,
                 properties.rateLimit().generationPerHour(),
@@ -244,6 +245,13 @@ public class GenerationService {
                 .findByIdAndUserId(sourceGenerationId, userId)
                 .orElseThrow(() -> ApiException.notFound("생성 기록"));
 
+        // A client that gave up waiting must not be able to buy a second
+        // attempt at a result that is still on its way — the first one is going
+        // to land, and charging for both is charging twice for one outcome.
+        if (!source.getStatus().isTerminal()) {
+            throw new ApiException(ErrorCode.GENERATION_NOT_COMPLETED);
+        }
+
         requireStyleUnlocked(userId, style);
 
         LocalDate today = clock.today();
@@ -251,6 +259,7 @@ public class GenerationService {
         if (todayCount >= properties.generation().maxPerDay()) {
             throw new ApiException(ErrorCode.DAILY_GENERATION_LIMIT);
         }
+        requireGlobalCapacity(today);
 
         PixelGeneration generation = PixelGeneration.create(
                 userId,
@@ -363,6 +372,26 @@ public class GenerationService {
     }
 
     /* ------------------------------------------------------------- helpers */
+
+    /**
+     * Whole-service ceiling for the day.
+     *
+     * <p>The per-user cap bounds one account; this bounds the bill. Without it
+     * a bug or a leaked credential scales provider spend linearly with
+     * accounts and there is nothing to pull. Checked before the allowance is
+     * spent, so hitting it costs the user nothing.
+     */
+    private void requireGlobalCapacity(LocalDate today) {
+        int ceiling = properties.generation().globalMaxPerDay();
+        if (ceiling <= 0) {
+            return;
+        }
+        long total = generationRepository.countByPostDate(today);
+        if (total >= ceiling) {
+            log.error("global daily generation ceiling reached: {}/{}", total, ceiling);
+            throw new ApiException(ErrorCode.GENERATION_CAPACITY);
+        }
+    }
 
     private void requireStyleUnlocked(UUID userId, PixelStyle style) {
         if (style.isFree()) {

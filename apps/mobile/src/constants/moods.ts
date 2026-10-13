@@ -1,19 +1,30 @@
+import { copy } from './copy';
+
 /**
  * Mood is a closed enum, not free emoji input: it keeps the feed tonally
  * consistent and makes "today's mood" filterable later.
  */
-export const MOODS = [
-  { code: 'HAPPY', emoji: '😊', label: '좋아요' },
-  { code: 'LOVELY', emoji: '🥰', label: '설레요' },
-  { code: 'SLEEPY', emoji: '😴', label: '졸려요' },
-  { code: 'BLANK', emoji: '😶', label: '그냥' },
-  { code: 'MELTED', emoji: '🫠', label: '녹았어요' },
-  { code: 'TEARY', emoji: '🥲', label: '그래도' },
-  { code: 'COOL', emoji: '😎', label: '좀 괜찮' },
-  { code: 'CHAOS', emoji: '🤯', label: '정신없어요' },
+const MOOD_CODES = [
+  { code: 'HAPPY', emoji: '😊' },
+  { code: 'LOVELY', emoji: '🥰' },
+  { code: 'SLEEPY', emoji: '😴' },
+  { code: 'BLANK', emoji: '😶' },
+  { code: 'MELTED', emoji: '🫠' },
+  { code: 'TEARY', emoji: '🥲' },
+  { code: 'COOL', emoji: '😎' },
+  { code: 'CHAOS', emoji: '🤯' },
 ] as const;
 
-export type MoodCode = (typeof MOODS)[number]['code'];
+/**
+ * The code and the emoji are the same in every language; only the label
+ * changes, so it is read from the active bundle rather than stored here.
+ */
+export const MOODS = MOOD_CODES.map((mood) => ({
+  ...mood,
+  label: copy.moods[mood.code],
+}));
+
+export type MoodCode = (typeof MOOD_CODES)[number]['code'];
 
 export const MOOD_BY_CODE = Object.fromEntries(
   MOODS.map((m) => [m.code, m]),

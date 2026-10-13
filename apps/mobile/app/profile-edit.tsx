@@ -50,13 +50,16 @@ export default function ProfileEditRoute() {
 
   const nicknameError = useMemo(() => {
     const trimmed = nickname.trim();
-    if (trimmed.length === 0) return '닉네임을 입력해주세요.';
+    if (trimmed.length === 0) return copy.profileSetup.nicknameRequired;
     if (trimmed.length < config.rules.minNicknameLength) return null;
     if (!NICKNAME_PATTERN.test(trimmed)) {
-      return '한글, 영문, 숫자, _만 쓸 수 있어요.';
+      return copy.profileSetup.nicknameInvalid;
     }
     if (nicknameChanged && availability.state === 'taken') {
       return copy.profileSetup.nicknameTaken;
+    }
+    if (nicknameChanged && availability.state === 'forbidden') {
+      return copy.profileSetup.nicknameForbidden;
     }
     return null;
   }, [availability.state, nickname, nicknameChanged]);
@@ -65,7 +68,9 @@ export default function ProfileEditRoute() {
     !nicknameError &&
     nickname.trim().length >= config.rules.minNicknameLength &&
     interests.length >= config.rules.minInterests &&
-    (!nicknameChanged || availability.state === 'available');
+    (!nicknameChanged ||
+      availability.state === 'available' ||
+      availability.state === 'unknown');
 
   const onSave = async () => {
     try {
@@ -74,7 +79,7 @@ export default function ProfileEditRoute() {
         bio: bio.trim() || null,
         interests,
       });
-      toast.show({ message: '프로필을 저장했어요.', tone: 'success' });
+      toast.show({ message: copy.profile.saved, tone: 'success' });
       router.back();
     } catch (error) {
       toast.show({ message: errorMessage(error), tone: 'error' });
@@ -101,7 +106,7 @@ export default function ProfileEditRoute() {
         contentContainerStyle={styles.content}
       >
         <TextField
-          label="닉네임"
+          label={copy.profile.nicknameLabel}
           value={nickname}
           onChangeText={setNickname}
           maxLength={config.rules.maxNicknameLength}
@@ -111,15 +116,26 @@ export default function ProfileEditRoute() {
           error={nicknameError}
           hint={
             nicknameChanged && availability.state === 'checking'
-              ? '확인 중…'
+              ? copy.profileSetup.nicknameChecking
               : nicknameChanged && availability.state === 'available'
-                ? '사용할 수 있어요.'
+                ? copy.profileSetup.nicknameAvailable
                 : undefined
           }
         />
+        {nicknameChanged &&
+        availability.state === 'taken' &&
+        availability.suggestion ? (
+          <Chip
+            label={copy.profileSetup.nicknameSuggestion(
+              availability.suggestion,
+            )}
+            onPress={() => setNickname(availability.suggestion!)}
+            style={styles.suggestion}
+          />
+        ) : null}
 
         <TextField
-          label="한줄소개"
+          label={copy.profile.bioLabel}
           value={bio}
           onChangeText={setBio}
           placeholder={copy.profileSetup.bioPlaceholder}
@@ -163,7 +179,7 @@ export default function ProfileEditRoute() {
 
         {me.data?.birthDate ? (
           <Text variant="micro" tone="tertiary" style={styles.note}>
-            생년월일은 변경할 수 없어요. 잘못 입력했다면 고객센터로 알려주세요.
+            {copy.profile.birthLocked}
           </Text>
         ) : null}
       </ScrollView>
@@ -174,6 +190,7 @@ export default function ProfileEditRoute() {
 const styles = StyleSheet.create({
   content: { paddingTop: spacing.base, paddingBottom: spacing.xxl },
   field: { marginTop: spacing.xl },
+  suggestion: { marginTop: spacing.sm, alignSelf: 'flex-start' },
   hint: { marginTop: spacing.xs },
   chips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md },
   chip: { marginRight: spacing.xs, marginBottom: spacing.xs },

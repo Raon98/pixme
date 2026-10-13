@@ -42,7 +42,11 @@ export default function HistoryRoute() {
       title={copy.my.history}
       right={
         <IconButton
-          label={mode === 'grid' ? '달력으로 보기' : '모아보기'}
+          label={
+            mode === 'grid'
+              ? copy.historyView.calendarView
+              : copy.historyView.gridView
+          }
           onPress={() => setMode(mode === 'grid' ? 'calendar' : 'grid')}
         >
           <Icon
@@ -78,7 +82,7 @@ export default function HistoryRoute() {
       <Screen edges={['top']}>
         {header}
         <EmptyState
-          glyph="👾"
+          icon="calendar"
           title={copy.profile.emptyHistoryTitle}
           body={copy.profile.emptyHistoryBody}
           actionLabel={copy.today.emptyCta}
@@ -153,7 +157,7 @@ function MonthGrid({
         <Pressable
           key={status.id}
           accessibilityRole="button"
-          accessibilityLabel={`${status.statusDate}의 PIXME`}
+          accessibilityLabel={copy.a11y.dayPixel(status.statusDate)}
           onPress={() => onSelect(status)}
           style={({ pressed }) => [
             styles.gridItem,
@@ -214,7 +218,7 @@ function MonthCalendar({
   return (
     <View>
       <View style={styles.weekRow}>
-        {['일', '월', '화', '수', '목', '금', '토'].map((label) => (
+        {copy.historyView.weekdays.map((label) => (
           <Text key={label} variant="micro" tone="tertiary" style={styles.weekLabel}>
             {label}
           </Text>
@@ -226,7 +230,9 @@ function MonthCalendar({
           <Pressable
             key={index}
             accessibilityRole={status ? 'button' : undefined}
-            accessibilityLabel={status ? `${status.statusDate}의 PIXME` : undefined}
+            accessibilityLabel={
+              status ? copy.a11y.dayPixel(status.statusDate) : undefined
+            }
             disabled={!status}
             onPress={() => status && onSelect(status)}
             style={({ pressed }) => [
@@ -253,12 +259,13 @@ function MonthCalendar({
 const styles = StyleSheet.create({
   content: { paddingBottom: spacing.xxl },
   monthTitle: { marginTop: spacing.lg, marginBottom: spacing.sm },
-  grid: { flexDirection: 'row', flexWrap: 'wrap' },
+  // `gap` rather than a percentage marginRight: a percentage margin is
+  // part of the margin box, so `31% + 3.5%` × 3 came to 103.5% and wrapped
+  // to two columns with a dead gutter on the right.
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   gridItem: {
     width: '31%',
     aspectRatio: 0.84,
-    marginRight: '3.5%',
-    marginBottom: spacing.sm,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',

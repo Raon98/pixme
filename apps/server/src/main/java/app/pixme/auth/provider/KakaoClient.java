@@ -46,6 +46,18 @@ public class KakaoClient {
         return fetchIdentity(accessToken);
     }
 
+    /**
+     * The native-SDK path: the app talks to the KakaoTalk app directly and
+     * already holds an access token by the time it reaches us, so there is no
+     * code to exchange — only the same identity lookup {@link #exchange} ends
+     * with. The token is still used once and discarded, same as the other
+     * path; it is just that the "once" now happens entirely server-side on a
+     * token the server never requested.
+     */
+    public SocialIdentity identityFromAccessToken(String accessToken) {
+        return fetchIdentity(accessToken);
+    }
+
     private String requestAccessToken(
             String authorizationCode, String redirectUri, String codeVerifier) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();

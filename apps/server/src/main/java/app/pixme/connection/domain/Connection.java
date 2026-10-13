@@ -111,4 +111,18 @@ public class Connection {
     public void end() {
         this.endedAt = Instant.now();
     }
+
+    /**
+     * Reconnects a pair that connected before and later ended it (unblock,
+     * un-severing). The unique index is on the (userA, userB) pair, not on
+     * "the currently active connection for this pair" — so a second wave
+     * match between the same two people has to revive this row rather than
+     * insert a new one, which the constraint would reject.
+     */
+    public void revive() {
+        this.endedAt = null;
+        this.connectedAt = Instant.now();
+        this.aAcknowledged = false;
+        this.bAcknowledged = false;
+    }
 }

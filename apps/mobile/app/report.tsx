@@ -19,25 +19,28 @@ import {
 } from '@/ui';
 import { useReport } from '@/features/safety/useSafety';
 
-const REASONS: { code: ReportReason; label: string; hint: string }[] = [
-  {
-    code: 'INAPPROPRIATE_CONTENT',
-    label: '부적절한 콘텐츠',
-    hint: '서비스에 맞지 않는 사진이나 글이에요.',
-  },
-  { code: 'HARASSMENT', label: '괴롭힘', hint: '불쾌하게 하거나 위협했어요.' },
-  { code: 'IMPERSONATION', label: '사칭', hint: '다른 사람인 척하고 있어요.' },
-  { code: 'SPAM', label: '광고 / 스팸', hint: '홍보나 반복적인 메시지예요.' },
-  { code: 'SEXUAL_CONTENT', label: '성적 콘텐츠', hint: '성적인 내용이 포함돼 있어요.' },
-  { code: 'HATE_SPEECH', label: '혐오 표현', hint: '특정 집단을 비하했어요.' },
-  { code: 'OTHER', label: '기타', hint: '위에 없는 다른 이유예요.' },
+const REASON_CODES: ReportReason[] = [
+  'INAPPROPRIATE_CONTENT',
+  'HARASSMENT',
+  'IMPERSONATION',
+  'SPAM',
+  'SEXUAL_CONTENT',
+  'HATE_SPEECH',
+  'OTHER',
 ];
+
+const REASONS: { code: ReportReason; label: string; hint: string }[] =
+  REASON_CODES.map((code) => ({
+    code,
+    label: copy.safety.reportReasons[code].label,
+    hint: copy.safety.reportReasons[code].hint,
+  }));
 
 /**
  * Reporting.
  *
  * Reachable from a profile, a post and a chat, so the target type comes in as
- * a param. "이 사용자도 함께 차단하기" defaults to on: someone who has just
+ * a param. `safety.reportAlsoBlock` defaults to on: someone who has just
  * been bothered enough to report almost always wants the person gone too.
  */
 export default function ReportRoute() {
@@ -141,8 +144,7 @@ export default function ReportRoute() {
         </View>
 
         <Text variant="micro" tone="tertiary" style={styles.note}>
-          접수된 신고는 운영팀이 확인하고, 필요한 경우 게시물 삭제나 이용 제한
-          조치를 해요. 처리 결과는 알림으로 알려드려요.
+          {copy.safety.reportNote}
         </Text>
       </ScrollView>
     </Screen>

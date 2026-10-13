@@ -24,6 +24,7 @@ import app.pixme.user.domain.UserProfile;
 import app.pixme.user.domain.UserSettings;
 import app.pixme.user.domain.UserStats;
 import app.pixme.user.domain.UserStatus;
+import app.pixme.user.repository.DeletedAccountFingerprintRepository;
 import app.pixme.user.repository.InterestRepository;
 import app.pixme.user.repository.UserInterestRepository;
 import app.pixme.user.repository.UserProfileRepository;
@@ -32,6 +33,7 @@ import app.pixme.user.repository.UserSettingsRepository;
 import app.pixme.user.repository.UserStatsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,6 +64,8 @@ public class UserService {
     private final CreditService creditService;
     private final TextSanitizer sanitizer;
     private final ServiceClock clock;
+    private final ApplicationEventPublisher events;
+    private final DeletedAccountFingerprintRepository fingerprintRepository;
 
     public UserService(
             UserRepository userRepository,
@@ -72,7 +76,9 @@ public class UserService {
             InterestRepository interestRepository,
             CreditService creditService,
             TextSanitizer sanitizer,
-            ServiceClock clock) {
+            ServiceClock clock,
+            ApplicationEventPublisher events,
+            DeletedAccountFingerprintRepository fingerprintRepository) {
         this.userRepository = userRepository;
         this.profileRepository = profileRepository;
         this.settingsRepository = settingsRepository;
@@ -82,6 +88,8 @@ public class UserService {
         this.creditService = creditService;
         this.sanitizer = sanitizer;
         this.clock = clock;
+        this.events = events;
+        this.fingerprintRepository = fingerprintRepository;
     }
 
     public record Resolution(User user, boolean created) {}
@@ -103,6 +111,8 @@ public class UserService {
 
         if (existing.isPresent()) {
             User user = existing.get();
+            boolean modified = false;
+
             if (user.isDeleted()) {
                 // Re-signing in during the grace period reactivates rather than
                 // creating a duplicate account.
@@ -111,10 +121,33 @@ public class UserService {
                         isProfileCompleted(user.getId())
                                 ? UserStatus.ACTIVE
                                 : UserStatus.PENDING_PROFILE);
-                userRepository.save(user);
+                modified = true;
                 log.info("reactivated account user={}", user.getId());
             }
-            userRepository.markActive(user.getId(), Instant.now());
+
+            // A provider can begin returning an email only after the account
+            // already exists (consent granted later), and entitlements keyed by
+            // email — master status, reserved assignments — stay unreachable
+            // until it lands.
+            if ((user.getEmail() == null || user.getEmail().isBlank())
+                    && identity.email() != null
+                    && !identity.email().isBlank()) {
+                user.setEmail(identity.email());
+                modified = true;
+                log.info("backfilled email for user={}", user.getId());
+                events.publishEvent(new ReservedSignupEvent(user.getId()));
+            }
+
+            Instant now = Instant.now();
+            if (modified) {
+                // Write the timestamp through the entity rather than alongside
+                // it: a dirty entity is flushed in full at commit, so a JPQL
+                // update would be silently overwritten by the stale value.
+                user.setLastActiveAt(now);
+                userRepository.save(user);
+            } else {
+                userRepository.markActive(user.getId(), now);
+            }
             return new Resolution(user, false);
         }
 
@@ -127,7 +160,17 @@ public class UserService {
             profileRepository.save(UserProfile.createFor(user.getId()));
             settingsRepository.save(UserSettings.createFor(user.getId()));
             statsRepository.save(UserStats.createFor(user.getId()));
-            creditService.initialize(user.getId());
+
+            String fingerprint =
+                    IdentityFingerprint.of(identity.provider().name(), identity.providerUserId());
+            if (fingerprintRepository.existsByIdentityHash(fingerprint)) {
+                creditService.initializeAsReturning(user.getId());
+                log.info("re-signup of a previously deleted identity, user={}", user.getId());
+            } else {
+                creditService.initialize(user.getId());
+            }
+
+            events.publishEvent(new ReservedSignupEvent(user.getId()));
 
             log.info("created account user={} provider={}", user.getId(), identity.provider());
             return new Resolution(user, true);
@@ -291,15 +334,37 @@ public class UserService {
             nickname = sanitizer.sanitizeNickname(rawNickname);
         } catch (ApiException exception) {
             return exception.code() == ErrorCode.NICKNAME_FORBIDDEN
-                    ? new NicknameAvailability(false, "FORBIDDEN")
-                    : new NicknameAvailability(false, "INVALID_FORMAT");
+                    ? new NicknameAvailability(false, "FORBIDDEN", null)
+                    : new NicknameAvailability(false, "INVALID_FORMAT", null);
         }
-        return profileRepository.existsByNicknameIgnoreCase(nickname)
-                ? new NicknameAvailability(false, "TAKEN")
-                : new NicknameAvailability(true, null);
+        if (!profileRepository.existsByNicknameIgnoreCase(nickname)) {
+            return new NicknameAvailability(true, null, null);
+        }
+        return new NicknameAvailability(false, "TAKEN", suggestAlternative(nickname));
     }
 
-    public record NicknameAvailability(boolean available, String reason) {}
+    /**
+     * {@code @지우} is taken → tries {@code 지우2}, {@code 지우3}, ... up to a
+     * sensible cap. Nicknames are a unique, hashtag-like handle (see
+     * {@code TextSanitizer#NICKNAME_ALLOWED}), so "it's taken" is a dead end
+     * without something to try next — the alternative always offering
+     * availability is what makes that recoverable in one tap instead of a
+     * guessing loop against the availability endpoint.
+     */
+    private String suggestAlternative(String nickname) {
+        // 12-char cap (TextSanitizer) means a 2-digit suffix needs the base
+        // trimmed to leave room — rare in practice, cheap to guard regardless.
+        String base = nickname.length() > 10 ? nickname.substring(0, 10) : nickname;
+        for (int suffix = 2; suffix <= 99; suffix++) {
+            String candidate = base + suffix;
+            if (!profileRepository.existsByNicknameIgnoreCase(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    public record NicknameAvailability(boolean available, String reason, String suggestion) {}
 
     @Transactional
     public void touchActivity(UUID userId) {

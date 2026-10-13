@@ -15,6 +15,7 @@ import {
   type AppNotification,
   type Page,
 } from '@/api';
+import { isSafeDeepLink } from '@/lib/deepLink';
 import { logger } from '@/lib/logger';
 import { MOCK_MODE } from '@/lib/mock';
 import { registerForPush, setBadgeCount } from '@/lib/push';
@@ -110,7 +111,7 @@ export function usePushRegistration() {
         void queryClient.invalidateQueries({
           queryKey: qk.notifications.badge(),
         });
-        if (deepLink) router.push(deepLink as never);
+        if (isSafeDeepLink(deepLink)) router.push(deepLink as never);
       },
     );
     return () => subscription.remove();
@@ -127,11 +128,14 @@ export function usePushRegistration() {
     return () => subscription.remove();
   }, [queryClient]);
 
+  // Never throws. Callers ask for push at a moment that belongs to some other
+  // action succeeding (keeping a first PIXME, say), so a failure here must not
+  // surface as that action having failed — and must not invite a retry of it.
   const promptNow = async () => {
     if (MOCK_MODE) return false;
-    const token = await registerForPush();
-    if (!token) return false;
     try {
+      const token = await registerForPush();
+      if (!token) return false;
       await usersApi.registerPushToken({
         token,
         platform: Platform.OS === 'ios' ? 'IOS' : 'ANDROID',

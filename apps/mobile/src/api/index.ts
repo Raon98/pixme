@@ -21,6 +21,7 @@ import { notificationsApi as realNotificationsApi } from './endpoints/notificati
 import { storeApi as realStoreApi } from './endpoints/store';
 import { safetyApi as realSafetyApi } from './endpoints/safety';
 import { systemApi as realSystemApi } from './endpoints/system';
+import { decorationsApi as realDecorationsApi } from './endpoints/decorations';
 
 import {
   mockAuthApi,
@@ -35,6 +36,7 @@ import {
   mockStoreApi,
   mockSafetyApi,
   mockSystemApi,
+  mockDecorationsApi,
 } from './mock';
 
 /**
@@ -54,3 +56,4 @@ export const notificationsApi = MOCK_MODE ? mockNotificationsApi : realNotificat
 export const storeApi = MOCK_MODE ? mockStoreApi : realStoreApi;
 export const safetyApi = MOCK_MODE ? mockSafetyApi : realSafetyApi;
 export const systemApi = MOCK_MODE ? mockSystemApi : realSystemApi;
+export const decorationsApi = MOCK_MODE ? mockDecorationsApi : realDecorationsApi;

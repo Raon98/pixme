@@ -101,7 +101,7 @@ class OpenAiLiveVerificationManualCheck {
                 new PixmeProperties.Ai.Flux(null, null, null));
         PixmeProperties properties = new PixmeProperties(
                 "Asia/Seoul", "1.0.0", null, null, null, aiConfig,
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
 
         PromptLibrary prompts = new PromptLibrary();
         OpenAiImageProvider provider = new OpenAiImageProvider(properties, prompts, new ObjectMapper());

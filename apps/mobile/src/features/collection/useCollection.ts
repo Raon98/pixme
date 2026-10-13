@@ -13,6 +13,21 @@ export function useCollection() {
   });
 }
 
+/** Removes an owned character. Past days keep whatever they were wearing. */
+export function useDeleteCharacter() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (characterId: string) => pixelsApi.deleteCharacter(characterId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.pixels.collection() }),
+        queryClient.invalidateQueries({ queryKey: qk.me.profile() }),
+      ]);
+    },
+  });
+}
+
 /**
  * Free switch among owned characters — never calls a provider. Also updates
  * today's status, so the switch shows up on Today/광장 immediately.

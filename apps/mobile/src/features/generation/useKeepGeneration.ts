@@ -33,7 +33,17 @@ export function useKeepGeneration() {
 
       clearDraft();
 
-      await queryClient.invalidateQueries({ queryKey: qk.pixels.collection() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.pixels.collection() }),
+        // `representativeCharacterUrl` lives on `me` — without this, every
+        // screen that gates on "does this account own a character yet"
+        // (Today's empty-state CTA, the square/chat no-character gate) keeps
+        // reading the pre-keep state and steers a first-time owner back into
+        // generating again instead of the free status/share flow.
+        character.isCurrent
+          ? queryClient.invalidateQueries({ queryKey: qk.me.profile() })
+          : Promise.resolve(),
+      ]);
     },
   });
 }

@@ -39,13 +39,65 @@ export function usePurchase() {
     null,
   );
 
+  /**
+   * Hands the store's purchase history to the server for the *current* PIXME
+   * account. Entitlements are per PIXME account, but a non-consumable belongs
+   * to the Apple/Play account — so the same device signed into a second PIXME
+   * account owns nothing here while the store refuses to sell it again. This
+   * is the bridge between those two models, and the reason "already owned" is
+   * a restore rather than an error.
+   */
+  const restoreFromStore = useCallback(async (): Promise<{
+    restored: number;
+    ownedByAnotherAccount: number;
+  }> => {
+    const purchases = await listRestorable();
+    if (purchases.length === 0) return { restored: 0, ownedByAnotherAccount: 0 };
+
+    const response = await storeApi.restorePurchases(
+      purchases.map((item) => ({
+        platform: billingPlatform,
+        // The server resolves the internal product code from the SKU.
+        productCode: '',
+        storeProductId: item.storeProductId,
+        receipt: item.receipt,
+        transactionId: item.transactionId,
+      })),
+    );
+
+    await Promise.all([
+      refreshUser(),
+      queryClient.invalidateQueries({ queryKey: qk.store.catalog() }),
+      queryClient.invalidateQueries({ queryKey: qk.me.credits() }),
+    ]);
+
+    return {
+      restored: response.restoredCount,
+      ownedByAnotherAccount: response.ownedByAnotherAccountCount,
+    };
+  }, [queryClient, refreshUser]);
+
   const buy = useCallback(
     async (product: StoreProduct): Promise<PurchaseOutcome> => {
+      // A non-consumable the store already granted will not sell again —
+      // StoreKit can leave the request hanging rather than erroring, so this
+      // is checked before ever calling out, not just relied on to disable
+      // the button (a stale catalog cache would otherwise hang silently).
+      if (product.owned && product.kind !== 'SUBSCRIPTION') {
+        return { status: 'error', message: copy.store.nothingToRestore };
+      }
+
       setPendingProductCode(product.code);
       analytics.track('STORE_OPENED', { productCode: product.code });
 
       try {
         const isSubscription = product.kind === 'SUBSCRIPTION';
+
+        // Nothing is asked of the store before `startPurchase`: every round
+        // trip here is time the user spends staring at a spinner before
+        // Apple's sheet even appears. The "store already owns this" case is
+        // handled on the way out instead, where it costs nothing until it
+        // actually happens.
         const result = await startPurchase({
           storeProductId: product.storeProductId,
           kind: isSubscription ? 'subscription' : 'consumable',
@@ -55,19 +107,40 @@ export function usePurchase() {
           if (result.error.kind === 'cancelled') {
             return { status: 'cancelled' };
           }
+
+          // The store already sold this to the underlying Apple/Play account
+          // — it will not charge twice, so the only thing missing is the
+          // grant on *this* PIXME account. Do the restore here instead of
+          // telling someone to go and find the button themselves.
+          if (result.error.kind === 'unavailable') {
+            return { status: 'error', message: copy.store.notAvailable };
+          }
+
+          // `timeout` is lumped in with `already-owned` on purpose: silence is
+          // how StoreKit declines to re-sell something, so the recovery is
+          // the same — see `BillingError`.
+          if (
+            result.error.kind === 'already-owned' ||
+            result.error.kind === 'timeout'
+          ) {
+            const outcome = await restoreFromStore();
+            if (outcome.restored > 0) {
+              haptics.celebrate();
+              return { status: 'granted' };
+            }
+            if (outcome.ownedByAnotherAccount > 0) {
+              return {
+                status: 'error',
+                message: copy.store.ownedByAnotherAccount,
+              };
+            }
+          }
+
           analytics.track('PURCHASE_FAILED', {
             productCode: product.code,
             reason: result.error.kind,
           });
-          return {
-            status: 'error',
-            message:
-              result.error.kind === 'unavailable'
-                ? copy.store.purchaseFailed
-                : result.error.kind === 'already-owned'
-                  ? copy.store.nothingToRestore
-                  : copy.store.purchaseFailed,
-          };
+          return { status: 'error', message: copy.store.purchaseFailed };
         }
 
         const verification = await storeApi.verifyPurchase({
@@ -124,40 +197,29 @@ export function usePurchase() {
         setPendingProductCode(null);
       }
     },
-    [queryClient, refreshUser],
+    [queryClient, refreshUser, restoreFromStore],
   );
 
   const restore = useCallback(async (): Promise<
-    { status: 'restored'; count: number } | { status: 'empty' } | { status: 'error' }
+    | { status: 'restored'; count: number }
+    | { status: 'owned-elsewhere' }
+    | { status: 'empty' }
+    | { status: 'error' }
   > => {
     try {
-      const purchases = await listRestorable();
-      if (purchases.length === 0) return { status: 'empty' };
-
-      const response = await storeApi.restorePurchases(
-        purchases.map((item) => ({
-          platform: billingPlatform,
-          // The server resolves the internal product code from the SKU.
-          productCode: '',
-          storeProductId: item.storeProductId,
-          receipt: item.receipt,
-          transactionId: item.transactionId,
-        })),
-      );
-
-      await Promise.all([
-        refreshUser(),
-        queryClient.invalidateQueries({ queryKey: qk.store.catalog() }),
-      ]);
-
-      return response.restoredCount > 0
-        ? { status: 'restored', count: response.restoredCount }
-        : { status: 'empty' };
+      const outcome = await restoreFromStore();
+      if (outcome.restored > 0) {
+        return { status: 'restored', count: outcome.restored };
+      }
+      if (outcome.ownedByAnotherAccount > 0) {
+        return { status: 'owned-elsewhere' };
+      }
+      return { status: 'empty' };
     } catch (error) {
       log.warn('restore failed', error);
       return { status: 'error' };
     }
-  }, [queryClient, refreshUser]);
+  }, [restoreFromStore]);
 
   return { buy, restore, pendingProductCode };
 }

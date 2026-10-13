@@ -16,14 +16,6 @@ import {
 } from '@/ui';
 import { useDeleteAccount } from '@/features/profile/useDeleteAccount';
 
-const REASONS = [
-  '잘 안 쓰게 돼요',
-  '사진 올리는 게 부담돼요',
-  '사람이 적어요',
-  '알림이 많아요',
-  '기타',
-];
-
 /**
  * Account deletion.
  *
@@ -78,30 +70,23 @@ export default function DeleteAccountRoute() {
           </View>
 
           <Text variant="label" tone="secondary" style={styles.sectionTitle}>
-            삭제되는 항목
+            {copy.settings.deleteItemsTitle}
           </Text>
-          {[
-            '프로필과 닉네임',
-            '지금까지 만든 PIXME와 원본 사진',
-            '받은 하트와 연결 기록',
-            '모든 대화 내용',
-          ].map((item) => (
+          {copy.settings.deleteItems.map((item) => (
             <Text key={item} variant="caption" tone="secondary" style={styles.item}>
               · {item}
             </Text>
           ))}
 
           <Text variant="micro" tone="tertiary" style={styles.retention}>
-            삭제 요청 즉시 모든 공개 화면에서 사라지고, 법령상 보관이 필요한
-            결제 기록을 제외한 개인정보는 정책에 따라 영구 삭제돼요. 구독 중이라면
-            스토어에서 별도로 해지해주세요.
+            {copy.settings.deleteRetention}
           </Text>
 
           <Text variant="label" tone="secondary" style={styles.sectionTitle}>
-            떠나는 이유를 알려주실 수 있나요? (선택)
+            {copy.settings.deleteReasonTitle}
           </Text>
           <View style={styles.chips}>
-            {REASONS.map((item) => (
+            {copy.settings.deleteReasons.map((item) => (
               <Chip
                 key={item}
                 label={item}

@@ -56,9 +56,22 @@ export type BillingError =
   | { kind: 'cancelled' }
   | { kind: 'unavailable' }
   | { kind: 'already-owned' }
+  /**
+   * The store never called back. Indistinguishable from `already-owned` from
+   * here — StoreKit's usual answer to "sell me a non-consumable this Apple ID
+   * already owns" is silence, not an error — so callers treat both the same.
+   */
+  | { kind: 'timeout' }
   | { kind: 'failed'; message: string };
 
 let connected = false;
+
+/**
+ * Every SKU the store has confirmed it sells, accumulated by `loadPrices`.
+ * Read by `purchase` so it can refuse a SKU the store doesn't know without
+ * asking the store again mid-tap.
+ */
+const loadedSkus = new Set<string>();
 
 export async function connect(): Promise<boolean> {
   if (connected) return true;
@@ -101,6 +114,7 @@ export async function loadPrices(params: {
         price?: number | null;
       };
       if (!product.id || !product.displayPrice) continue;
+      loadedSkus.add(product.id);
       prices[product.id] = {
         storeProductId: product.id,
         displayPrice: product.displayPrice,
@@ -157,6 +171,15 @@ function classify(error: PurchaseError): BillingError {
  * listeners down — leaking them would deliver a later purchase to a stale
  * handler.
  */
+/**
+ * How long to wait for the store to call back before giving up.
+ *
+ * Neither listener is guaranteed to fire: most visibly, re-requesting a
+ * non-consumable the account already owns can leave both StoreKit callbacks
+ * silent, which otherwise hung this promise — and the "구매" button — forever.
+ */
+const PURCHASE_TIMEOUT_MS = 30_000;
+
 export function purchase(params: {
   storeProductId: string;
   kind: 'consumable' | 'subscription';
@@ -173,10 +196,16 @@ export function purchase(params: {
     ) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeout);
       updateSubscription.remove();
       errorSubscription.remove();
       resolve(result);
     };
+
+    const timeout = setTimeout(() => {
+      log.warn('purchase timed out waiting for store callback', params.storeProductId);
+      finish({ status: 'error', error: { kind: 'timeout' } });
+    }, PURCHASE_TIMEOUT_MS);
 
     const updateSubscription = purchaseUpdatedListener((incoming) => {
       if (incoming.productId !== params.storeProductId) return;
@@ -197,6 +226,16 @@ export function purchase(params: {
 
     void (async () => {
       if (!(await connect())) {
+        finish({ status: 'error', error: { kind: 'unavailable' } });
+        return;
+      }
+
+      // A SKU the store never loaded is the one case where `requestPurchase`
+      // reliably goes quiet instead of throwing — a spinner with no end. The
+      // answer is already cached from `loadPrices`, so this costs nothing and
+      // adds no delay before Apple's sheet.
+      if (loadedSkus.size > 0 && !loadedSkus.has(params.storeProductId)) {
+        log.warn('store never loaded this sku', params.storeProductId);
         finish({ status: 'error', error: { kind: 'unavailable' } });
         return;
       }

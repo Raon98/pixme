@@ -22,6 +22,7 @@ import app.pixme.connection.repository.ConnectionRepository;
 import app.pixme.safety.repository.BlockRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +53,7 @@ public class ChatService {
     private final PixmeProperties properties;
     /** Realtime socket and push both listen; order is irrelevant. */
     private final List<ChatEventPublisher> eventPublishers;
+    private final MessageWriter messageWriter;
 
     public ChatService(
             ConversationRepository conversationRepository,
@@ -62,7 +64,8 @@ public class ChatService {
             TextSanitizer sanitizer,
             RateLimiter rateLimiter,
             PixmeProperties properties,
-            List<ChatEventPublisher> eventPublishers) {
+            List<ChatEventPublisher> eventPublishers,
+            MessageWriter messageWriter) {
         this.conversationRepository = conversationRepository;
         this.memberRepository = memberRepository;
         this.messageRepository = messageRepository;
@@ -72,9 +75,13 @@ public class ChatService {
         this.rateLimiter = rateLimiter;
         this.properties = properties;
         this.eventPublishers = eventPublishers;
+        this.messageWriter = messageWriter;
     }
 
     /* ------------------------------------------------------------- create */
+
+    /** A wave's attached note, already sanitized, in the order the waves happened. */
+    public record OpeningNote(UUID senderId, String message) {}
 
     /**
      * Creates the conversation for a freshly mutual connection, with the system
@@ -85,6 +92,17 @@ public class ChatService {
      */
     @Transactional
     public Conversation createForConnection(Connection connection) {
+        return createForConnection(connection, List.of());
+    }
+
+    /**
+     * Same as {@link #createForConnection(Connection)}, plus whichever side(s)
+     * attached a one-line note to their wave — each becomes a real opening
+     * message from its sender, right after the system line, instead of a
+     * thread that starts blank.
+     */
+    @Transactional
+    public Conversation createForConnection(Connection connection, List<OpeningNote> notes) {
         Optional<Conversation> existing =
                 conversationRepository.findByConnectionId(connection.getId());
         if (existing.isPresent()) {
@@ -99,7 +117,19 @@ public class ChatService {
 
         Message opener = Message.system(conversation.getId(), SYSTEM_OPENER);
         messageRepository.save(opener);
-        conversation.setLastMessageAt(opener.getCreatedAt());
+        Instant lastMessageAt = opener.getCreatedAt();
+
+        for (OpeningNote note : notes) {
+            if (note.message() == null || note.message().isBlank()) {
+                continue;
+            }
+            Message noteMessage =
+                    Message.text(conversation.getId(), note.senderId(), note.message(), null);
+            messageRepository.save(noteMessage);
+            lastMessageAt = noteMessage.getCreatedAt();
+        }
+
+        conversation.setLastMessageAt(lastMessageAt);
         conversationRepository.save(conversation);
 
         return conversation;
@@ -215,9 +245,9 @@ public class ChatService {
 
         String content = sanitizer.sanitizeMessage(rawContent);
         Message message = Message.text(conversationId, senderId, content, clientMessageId);
-        messageRepository.save(message);
 
-        conversation.setLastMessageAt(message.getCreatedAt());
+        final Message inserted = insertOrFindWinner(message, conversationId, clientMessageId);
+        conversation.setLastMessageAt(inserted.getCreatedAt());
         conversationRepository.save(conversation);
 
         memberRepository
@@ -227,8 +257,27 @@ public class ChatService {
                     memberRepository.save(peer);
                 });
 
-        eventPublishers.forEach(publisher -> publisher.onMessageSent(message, senderId, peerId));
-        return message;
+        eventPublishers.forEach(publisher -> publisher.onMessageSent(inserted, senderId, peerId));
+        return inserted;
+    }
+
+    /**
+     * In its own transaction on purpose — see {@link MessageWriter}. The
+     * client deliberately sends every message over both the socket and REST;
+     * whichever lands first wins, idempotent on {@code clientMessageId}, so a
+     * lost race here is the expected outcome, not an exceptional one.
+     */
+    private Message insertOrFindWinner(Message message, UUID conversationId, String clientMessageId) {
+        try {
+            return messageWriter.insert(message);
+        } catch (DataIntegrityViolationException exception) {
+            if (clientMessageId == null) {
+                throw exception;
+            }
+            return messageRepository
+                    .findByConversationIdAndClientMessageId(conversationId, clientMessageId)
+                    .orElseThrow(() -> exception);
+        }
     }
 
     /* --------------------------------------------------------------- read */

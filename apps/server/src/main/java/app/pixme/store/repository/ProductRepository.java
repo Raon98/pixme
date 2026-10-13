@@ -15,6 +15,8 @@ public interface ProductRepository extends JpaRepository<Product, String> {
 
     List<Product> findByKindAndActiveTrueOrderBySortOrderAsc(ProductKind kind);
 
+    Optional<Product> findByUnlockCodeAndActiveTrue(String unlockCode);
+
     /**
      * Resolves a product from a store SKU. Needed by "구매 복원", where the
      * client only has the store's product id and not our internal code.

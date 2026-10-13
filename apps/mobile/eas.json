@@ -30,8 +30,12 @@
         "PIXME_API_BASE_URL": "https://staging-api.pixme.app/api/v1",
         "PIXME_WS_BASE_URL": "wss://staging-api.pixme.app/ws"
       },
-      "ios": { "simulator": false },
-      "android": { "buildType": "apk" }
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
+      }
     },
     "production": {
       "extends": "base",
@@ -39,16 +43,25 @@
       "autoIncrement": true,
       "env": {
         "PIXME_VARIANT": "production",
-        "PIXME_API_BASE_URL": "https://api.pixme.app/api/v1",
-        "PIXME_WS_BASE_URL": "wss://api.pixme.app/ws"
+        "PIXME_API_BASE_URL": "https://pixme-api.mohae.xyz/api/v1",
+        "PIXME_WS_BASE_URL": "wss://pixme-api.mohae.xyz/ws",
+        "PIXME_KAKAO_NATIVE_APP_KEY": "ac57f67a90dbf208b93589f0c2c48152",
+        "PIXME_KAKAO_REST_API_KEY": "bd5f0e8692384359b10fc01c64d66113",
+        "PIXME_TERMS_URL": "https://pixme.mohae.xyz/terms",
+        "PIXME_PRIVACY_URL": "https://pixme.mohae.xyz/privacy",
+        "PIXME_FACEBOOK_APP_ID": "1599047111506415"
       },
-      "android": { "buildType": "app-bundle" }
+      "android": {
+        "buildType": "app-bundle"
+      }
     }
   },
   "submit": {
     "production": {
       "ios": {
-        "language": "ko-KR"
+        "language": "ko-KR",
+        "appleTeamId": "W3P2HQK7J7",
+        "ascAppId": "6821331238"
       },
       "android": {
         "track": "internal",

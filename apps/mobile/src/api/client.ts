@@ -207,9 +207,12 @@ export async function uploadToPresignedUrl(params: {
   });
 
   if (!response.ok) {
+    // TEMP debug: include status + body so the failed screen shows the real
+    // reason instead of a generic message. Revert once root-caused.
+    const bodyText = await response.text().catch(() => '');
     throw new ApiError({
       code: 'UPLOAD_FAILED',
-      message: '사진을 올리지 못했어요. 잠시 후 다시 시도해주세요.',
+      message: `[${response.status}] ${bodyText.slice(0, 300) || '사진을 올리지 못했어요.'}`,
       status: response.status,
     });
   }

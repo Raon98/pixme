@@ -11,9 +11,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { copy } from '@/constants/copy';
 import { duration, radius, useTheme } from '@/theme';
 
-import { Text } from './Text';
 
 export interface PixelCharacterProps {
   /** Transparent-background PNG produced by the generation pipeline. */
@@ -27,8 +27,6 @@ export interface PixelCharacterProps {
   idleVariant?: number;
   contentFit?: ImageContentFit;
   style?: StyleProp<ViewStyle>;
-  /** Shown while loading and when `uri` is null. */
-  placeholderLabel?: string;
   /** Disk+memory cache: characters are immutable once generated. */
   priority?: 'low' | 'normal' | 'high';
   accessibilityLabel?: string;
@@ -50,18 +48,28 @@ export function PixelCharacter({
   idleVariant = 0,
   contentFit = 'contain',
   style,
-  placeholderLabel = '👾',
   priority = 'normal',
   accessibilityLabel,
 }: PixelCharacterProps) {
   const { colors } = useTheme();
   const [failed, setFailed] = useState(false);
   const bob = useSharedValue(0);
+  const sway = useSharedValue(0);
 
   // 3 phase buckets keeps the crowd varied without looking random.
   const phase = useMemo(() => (idleVariant % 3) * 140, [idleVariant]);
   const period = useMemo(
     () => duration.pixelStep * (6 + (idleVariant % 3)),
+    [idleVariant],
+  );
+  /**
+   * The sway runs on a deliberately different period from the bob, and an
+   * odd multiple so the two never resync into one mechanical motion. Without
+   * it a crowd reads as a row of objects moving up and down rather than
+   * people shifting their weight.
+   */
+  const swayPeriod = useMemo(
+    () => duration.pixelStep * (11 + ((idleVariant * 2) % 5)),
     [idleVariant],
   );
 
@@ -78,13 +86,31 @@ export function PixelCharacter({
         false,
       ),
     );
+    sway.value = withDelay(
+      phase * 2,
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration: swayPeriod, easing: Easing.inOut(Easing.sin) }),
+          withTiming(-1, { duration: swayPeriod, easing: Easing.inOut(Easing.sin) }),
+        ),
+        -1,
+        true,
+      ),
+    );
     return () => {
       bob.value = 0;
+      sway.value = 0;
     };
-  }, [idle, phase, period, bob]);
+  }, [idle, phase, period, swayPeriod, bob, sway]);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: bob.value * Math.max(1, size * 0.018) }],
+    transform: [
+      { translateY: bob.value * Math.max(1, size * 0.018) },
+      { translateX: sway.value * Math.max(0.5, size * 0.008) },
+      // Pivot at the feet, so the weight shift looks like a person leaning
+      // rather than a sprite spinning around its middle.
+      { rotateZ: `${sway.value * 0.5}deg` },
+    ],
   }));
 
   if (!uri || failed) {
@@ -101,9 +127,9 @@ export function PixelCharacter({
           style,
         ]}
         accessible
-        accessibilityLabel={accessibilityLabel ?? 'PIXME 캐릭터'}
+        accessibilityLabel={accessibilityLabel ?? copy.a11y.pixelCharacter}
       >
-        <Text style={{ fontSize: size * 0.34 }}>{placeholderLabel}</Text>
+        <PlaceholderFigure size={size} color={colors.textTertiary} />
       </View>
     );
   }
@@ -123,9 +149,42 @@ export function PixelCharacter({
         recyclingKey={uri}
         onError={() => setFailed(true)}
         accessible
-        accessibilityLabel={accessibilityLabel ?? 'PIXME 캐릭터'}
+        accessibilityLabel={accessibilityLabel ?? copy.a11y.pixelCharacter}
       />
     </Animated.View>
+  );
+}
+
+/**
+ * Stand-in for a character that is missing or still loading.
+ *
+ * <p>Two stacked blocks, not an emoji: a glossy multi-colour glyph was the
+ * most saturated thing on an otherwise quiet screen, and it read as a
+ * mascot the product does not have. This reads as "a character belongs
+ * here" and then gets out of the way.
+ */
+function PlaceholderFigure({ size, color }: { size: number; color: string }) {
+  const unit = size * 0.16;
+  return (
+    <View style={{ alignItems: 'center', opacity: 0.45 }}>
+      <View
+        style={{
+          width: unit * 1.1,
+          height: unit * 1.1,
+          borderRadius: 2,
+          backgroundColor: color,
+        }}
+      />
+      <View
+        style={{
+          width: unit * 1.7,
+          height: unit * 1.5,
+          marginTop: unit * 0.3,
+          borderRadius: 2,
+          backgroundColor: color,
+        }}
+      />
+    </View>
   );
 }
 

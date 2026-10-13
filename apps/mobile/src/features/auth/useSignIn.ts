@@ -54,7 +54,7 @@ export function useSignIn() {
             setError(copy.auth.failed);
             return false;
           }
-          const response = await authApi.kakao(outcome.payload);
+          const response = await authApi.kakaoNative(outcome.payload);
           await applyAuthResponse(response);
         }
 

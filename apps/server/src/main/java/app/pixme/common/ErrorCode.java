@@ -39,6 +39,10 @@ public enum ErrorCode {
     NO_GENERATION_AVAILABLE(HttpStatus.PAYMENT_REQUIRED, "생성권이 없어요."),
     DAILY_GENERATION_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "오늘은 더 만들 수 없어요."),
     UNSAFE_IMAGE(HttpStatus.UNPROCESSABLE_ENTITY, "이 사진으로는 PIXME를 만들기 어려워요."),
+    /** The whole-service daily ceiling, not the user's own cap. */
+    GENERATION_CAPACITY(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "지금은 PIXME를 만들 수 없어요. 잠시 후 다시 시도해주세요."),
     GENERATION_NOT_COMPLETED(HttpStatus.CONFLICT, "아직 PIXME가 완성되지 않았어요."),
     GENERATION_ALREADY_PUBLISHED(HttpStatus.CONFLICT, "이미 게시된 PIXME예요."),
     ALREADY_PUBLISHED_TODAY(HttpStatus.CONFLICT, "오늘의 PIXME가 이미 있어요."),
@@ -50,6 +54,7 @@ public enum ErrorCode {
     BLOCKED_BY_PEER(HttpStatus.FORBIDDEN, "지금은 이 사용자와 연결할 수 없어요."),
     ALREADY_CONNECTED(HttpStatus.CONFLICT, "이미 연결된 사이예요."),
     NOT_CONNECTED(HttpStatus.FORBIDDEN, "서로 연결된 뒤에 대화할 수 있어요."),
+    DAILY_WAVE_LIMIT(HttpStatus.TOO_MANY_REQUESTS, "오늘 표현할 수 있는 만큼 다 보냈어요. 내일 다시 보내보세요."),
     CONVERSATION_INACTIVE(HttpStatus.FORBIDDEN, "더 이상 대화할 수 없어요."),
 
     // store

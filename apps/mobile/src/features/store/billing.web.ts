@@ -35,6 +35,7 @@ export type BillingError =
   | { kind: 'cancelled' }
   | { kind: 'unavailable' }
   | { kind: 'already-owned' }
+  | { kind: 'timeout' }
   | { kind: 'failed'; message: string };
 
 export async function connect(): Promise<boolean> {

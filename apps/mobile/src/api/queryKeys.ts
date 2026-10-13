@@ -56,6 +56,9 @@ export const qk = {
   store: {
     catalog: () => ['store', 'catalog'] as const,
   },
+  decorations: {
+    list: () => ['decorations'] as const,
+  },
   safety: {
     blocked: () => ['safety', 'blocked'] as const,
   },

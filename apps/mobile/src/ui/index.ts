@@ -1,4 +1,5 @@
 export { Text } from './Text';
+export { Emoji } from './Emoji';
 export type { TextProps, TextVariant, TextTone } from './Text';
 export { Screen } from './Screen';
 export { Button } from './Button';

@@ -138,8 +138,14 @@ export function useSendMessage(conversationId: string) {
     },
   });
 
+  /**
+   * @param onFailed called with the original text when the send did not land,
+   *     so the screen can put it back in the composer. Without this the
+   *     message disappears completely on failure — the optimistic bubble is
+   *     removed here and the composer was already cleared by the caller.
+   */
   const send = useCallback(
-    (content: string) => {
+    (content: string, onFailed?: (content: string) => void) => {
       const trimmed = content.trim();
       if (!trimmed) return;
 
@@ -153,12 +159,15 @@ export function useSendMessage(conversationId: string) {
         // Render optimistically; the ACK frame will reconcile the real id.
         mutation.mutate(
           { content: trimmed, clientMessageId },
-          { onSuccess: () => undefined },
+          { onSuccess: () => undefined, onError: () => onFailed?.(trimmed) },
         );
         return;
       }
 
-      mutation.mutate({ content: trimmed, clientMessageId });
+      mutation.mutate(
+        { content: trimmed, clientMessageId },
+        { onError: () => onFailed?.(trimmed) },
+      );
     },
     [conversationId, mutation],
   );

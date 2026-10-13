@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 
 import type { DailyStatusEntry } from '@/api';
@@ -19,7 +18,13 @@ import {
   useToast,
 } from '@/ui';
 
+import { ConnectionQuotaDialog } from '../connections/ConnectionQuotaDialog';
 import { useConnectionRequest } from '../connections/useConnectionRequest';
+import { WaveComposeDialog } from '../connections/WaveComposeDialog';
+import { DecoFrame } from '../decorations/DecoFrame';
+import { DecoratedBackground } from '../decorations/DecoratedBackground';
+import { burstFor, DARK_BACKGROUNDS, NICKNAMES } from '../decorations/catalog';
+import { useDecorations } from '../decorations/useDecorations';
 import { useHeart } from '../reactions/useHeart';
 
 export interface FeedCardProps {
@@ -45,12 +50,31 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
   const { toggleHeart } = useHeart();
   const connectionRequest = useConnectionRequest();
 
-  const [burst, setBurst] = useState(0);
+  const [burstKey, setBurstKey] = useState(0);
 
   const characterSize = useMemo(
     () => Math.min(height * 0.42, 320),
     [height],
   );
+
+  // The author's decorations arrive inline on the card; the server has
+  // already removed anything they may no longer use, so these render as-is.
+  const decorations = status.author.decorations ?? {};
+  const onDarkBackground =
+    !!decorations.BACKGROUND && DARK_BACKGROUNDS.has(decorations.BACKGROUND);
+  const nickname = decorations.NICKNAME ? NICKNAMES[decorations.NICKNAME] : undefined;
+  /**
+   * The *viewer's* own unlock, not the card author's. Background/frame/
+   * nickname sit statically on the card, so an author's choice is genuinely
+   * visible to anyone who looks — but the burst is a local animation that
+   * plays only on whichever device tapped heart, with no realtime channel to
+   * the author's screen. Keying it to the author would mean nobody, ever,
+   * sees the effect they paid for; keying it to the viewer means whoever
+   * bought it gets to enjoy it on every heart they send, which is the only
+   * version of "it works" this slot can actually deliver.
+   */
+  const myDecorations = useDecorations();
+  const burst = burstFor(myDecorations.data?.active.PARTICLE);
 
   const waveState = status.author.connectionStatus;
   const waveSent =
@@ -59,7 +83,7 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
   const onHeart = useCallback(() => {
     const next = toggleHeart(status);
     if (next) {
-      setBurst((value) => value + 1);
+      setBurstKey((value) => value + 1);
       toast.show({
         message: copy.reactions.heartSent,
         tone: 'heart',
@@ -68,32 +92,42 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
     }
   }, [status, toggleHeart, toast]);
 
+  const [composingWave, setComposingWave] = useState(false);
+
   const onWave = useCallback(() => {
     if (waveSent) {
       toast.show(copy.reactions.waveAlready);
       return;
     }
+    setComposingWave(true);
+  }, [toast, waveSent]);
 
-    connectionRequest.mutate(
-      { userId: status.author.id },
-      {
-        onSuccess: (response) => {
-          if (response.connection) {
-            router.push({
-              pathname: '/connection-success',
-              params: { connectionId: response.connection.id },
+  const sendWave = useCallback(
+    (message: string | null) => {
+      connectionRequest.mutate(
+        { userId: status.author.id, message },
+        {
+          onSuccess: (response) => {
+            setComposingWave(false);
+            if (response.connection) {
+              router.push({
+                pathname: '/connection-success',
+                params: { connectionId: response.connection.id },
+              });
+              return;
+            }
+            toast.show({
+              message: copy.reactions.waveSent,
+              tone: 'wave',
+              icon: 'wave',
             });
-            return;
-          }
-          toast.show({
-            message: copy.reactions.waveSent,
-            tone: 'wave',
-            icon: 'wave',
-          });
+          },
+          onError: () => setComposingWave(false),
         },
-      },
-    );
-  }, [connectionRequest, status.author.id, router, toast, waveSent]);
+      );
+    },
+    [connectionRequest, status.author.id, router, toast],
+  );
 
   const openProfile = useCallback(() => {
     analytics.track('SQUARE_PROFILE_OPENED', { targetUserId: status.author.id });
@@ -108,18 +142,18 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
           { backgroundColor: colors.stage, borderColor: colors.border },
         ]}
       >
-        <LinearGradient
-          colors={[colors.stageTop, colors.stageBottom]}
-          start={{ x: 0.1, y: 0 }}
-          end={{ x: 0.9, y: 1 }}
-          style={styles.stage}
+        <DecoratedBackground
+          code={decorations.BACKGROUND}
+          fallback={[colors.stageTop, colors.stageBottom]}
+          active={active}
         />
+        <DecoFrame code={decorations.FRAME} radius={radius.xl} />
 
         {/* header */}
         <Pressable
           onPress={openProfile}
           accessibilityRole="button"
-          accessibilityLabel={`${status.author.nickname}의 프로필 열기`}
+          accessibilityLabel={copy.a11y.openProfile(status.author.nickname)}
           style={({ pressed }) => [
             styles.header,
             pressed ? { opacity: opacity.pressed } : null,
@@ -136,7 +170,21 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
             }
           />
           <View style={styles.headerText}>
-            <Text variant="bodyStrong" numberOfLines={1}>
+            <Text
+              variant="bodyStrong"
+              numberOfLines={1}
+              style={[
+                onDarkBackground ? { color: '#FFFDF8' } : null,
+                nickname
+                  ? {
+                      textShadowColor: nickname.glow,
+                      textShadowOffset: { width: 0, height: 0 },
+                      textShadowRadius: nickname.radius,
+                      ...(nickname.color ? { color: nickname.color } : null),
+                    }
+                  : null,
+              ]}
+            >
               @{status.author.nickname}
             </Text>
             <Text variant="micro" tone="tertiary">
@@ -161,9 +209,14 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
             idle={active}
             idleVariant={status.id.charCodeAt(0) % 3}
             priority={active ? 'high' : 'normal'}
-            accessibilityLabel={`${status.author.nickname}의 오늘의 PIXME`}
+            accessibilityLabel={copy.a11y.userTodayPixel(status.author.nickname)}
           />
-          <HeartBurst trigger={burst} />
+          <HeartBurst
+            trigger={burstKey}
+            particles={burst.particles}
+            glyph={burst.glyph}
+            color={burst.color}
+          />
         </View>
 
         {/* caption / mood / tags */}
@@ -179,7 +232,7 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
               variant="title2"
               align="center"
               style={styles.mood}
-              accessibilityLabel={`기분 ${moodLabel(status.mood)}`}
+              accessibilityLabel={copy.a11y.mood(moodLabel(status.mood))}
             >
               {moodEmoji(status.mood)}
             </Text>
@@ -208,16 +261,21 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
             onPress={onHeart}
           />
           <ActionButton
-            label={copy.reactions.wave}
-            icon="wave"
+            label={waveSent ? copy.reactions.waveSentLabel : copy.reactions.wave}
+            icon={waveSent ? 'check' : 'wave'}
             color={waveSent ? colors.wave : colors.textSecondary}
             backgroundColor={waveSent ? colors.waveSubtle : colors.surface}
             onPress={onWave}
+            // Stays tappable rather than `disabled` even once sent: a greyed
+            // button reads as broken/blocked, and the sent state needs to
+            // stay visually "done", not "unavailable" — see onWave, which
+            // turns a repeat tap into the waveAlready toast instead of a
+            // resend. Only the in-flight request itself is disabled.
             disabled={connectionRequest.isPending}
             emphasis
           />
           <ActionButton
-            label="프로필"
+            label={copy.profile.short}
             icon="user"
             color={colors.textSecondary}
             backgroundColor={colors.surface}
@@ -225,6 +283,19 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
           />
         </View>
       </View>
+
+      <ConnectionQuotaDialog
+        visible={connectionRequest.quotaDialogVisible}
+        plusActive={connectionRequest.quotaDialogPlusActive}
+        onDismiss={connectionRequest.dismissQuotaDialog}
+      />
+
+      <WaveComposeDialog
+        visible={composingWave}
+        loading={connectionRequest.isPending}
+        onSend={sendWave}
+        onCancel={() => setComposingWave(false)}
+      />
     </View>
   );
 }
@@ -239,7 +310,7 @@ function ActionButton({
   emphasis = false,
 }: {
   label: string;
-  icon: 'heart' | 'heart-filled' | 'wave' | 'user';
+  icon: 'heart' | 'heart-filled' | 'wave' | 'user' | 'check';
   color: string;
   backgroundColor: string;
   onPress: () => void;
@@ -280,6 +351,11 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   stage: { ...StyleSheet.absoluteFill },
+  nicknameGlow: {
+    textShadowColor: '#F9AE2B',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+  },
   header: { flexDirection: 'row', alignItems: 'center' },
   headerText: { flex: 1, marginLeft: spacing.md },
   heartCount: { flexDirection: 'row', alignItems: 'center' },

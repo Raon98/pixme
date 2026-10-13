@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
 
 import { INTERESTS } from '@/constants/interests';
 import { copy } from '@/constants/copy';
@@ -14,9 +13,9 @@ import {
   useUpdateMe,
 } from '@/features/profile/useProfile';
 
-type Step = 'nickname' | 'birth' | 'interests' | 'bio' | 'done';
+type Step = 'nickname' | 'birth' | 'interests' | 'bio';
 
-const STEP_ORDER: Step[] = ['nickname', 'birth', 'interests', 'bio', 'done'];
+const STEP_ORDER: Step[] = ['nickname', 'birth', 'interests', 'bio'];
 
 const NICKNAME_PATTERN = /^[가-힣a-zA-Z0-9_]+$/;
 
@@ -24,12 +23,11 @@ const NICKNAME_PATTERN = /^[가-힣a-zA-Z0-9_]+$/;
  * First-run profile setup.
  *
  * Four short steps, each one screen, each independently valid — the point is
- * to reach "첫 PIXME를 만들어볼까요?" quickly, not to collect a full profile.
+ * to finish quickly, not to collect a full profile.
  * Only nickname, birth date and at least one interest are required; the bio is
  * optional and skippable.
  */
 export default function ProfileSetupRoute() {
-  const router = useRouter();
   const toast = useToast();
   const { colors } = useTheme();
   const updateMe = useUpdateMe();
@@ -50,9 +48,10 @@ export default function ProfileSetupRoute() {
     if (trimmed.length === 0) return null;
     if (trimmed.length < config.rules.minNicknameLength) return null;
     if (!NICKNAME_PATTERN.test(trimmed)) {
-      return '한글, 영문, 숫자, _만 쓸 수 있어요.';
+      return copy.profileSetup.nicknameInvalid;
     }
     if (availability.state === 'taken') return copy.profileSetup.nicknameTaken;
+    if (availability.state === 'forbidden') return copy.profileSetup.nicknameForbidden;
     return null;
   }, [availability.state, nickname]);
 
@@ -60,10 +59,10 @@ export default function ProfileSetupRoute() {
 
   const birthError = useMemo(() => {
     if (birth.replace(/\D/g, '').length < 8) return null;
-    if (!birthDate) return '날짜를 다시 확인해주세요.';
+    if (!birthDate) return copy.profileSetup.birthInvalid;
     const age = calculateAge(birthDate);
     if (age < config.rules.minAge) return copy.profileSetup.birthTooYoung;
-    if (age > 100) return '날짜를 다시 확인해주세요.';
+    if (age > 100) return copy.profileSetup.birthInvalid;
     return null;
   }, [birth, birthDate]);
 
@@ -73,14 +72,18 @@ export default function ProfileSetupRoute() {
         return (
           nickname.trim().length >= config.rules.minNicknameLength &&
           !nicknameError &&
-          availability.state === 'available'
+          // 'unknown' = the availability check itself failed (offline, 5xx).
+          // Let them through rather than trapping them on step 1; the server
+          // still rejects a real duplicate on submit.
+          // Allowlist, not a denylist of 'taken': 'forbidden' is excluded the
+          // same way 'taken' is, without needing its own check here.
+          (availability.state === 'available' || availability.state === 'unknown')
         );
       case 'birth':
         return !!birthDate && !birthError;
       case 'interests':
         return interests.length >= config.rules.minInterests;
       case 'bio':
-      case 'done':
         return true;
     }
   }, [
@@ -112,49 +115,12 @@ export default function ProfileSetupRoute() {
         interestCount: interests.length,
         hasBio: bio.trim().length > 0,
       });
-      setStep('done');
     } catch {
       toast.show({ message: copy.errors.generic, tone: 'error' });
     }
   }, [bio, birthDate, interests, nickname, toast, updateMe]);
 
   /* ---------------------------------------------------------------- render */
-
-  if (step === 'done') {
-    return (
-      <Screen
-        footer={
-          <View>
-            <Button
-              label={copy.profileSetup.doneCta}
-              onPress={() => router.replace('/create')}
-            />
-            <Button
-              label={copy.profileSetup.doneLater}
-              variant="ghost"
-              onPress={() => router.replace('/(tabs)')}
-              style={styles.secondary}
-            />
-          </View>
-        }
-      >
-        <View style={styles.doneBody}>
-          <Text style={styles.doneGlyph}>👾</Text>
-          <Text variant="title1" align="center">
-            {copy.profileSetup.done}
-          </Text>
-          <Text
-            variant="body"
-            tone="secondary"
-            align="center"
-            style={styles.doneText}
-          >
-            {copy.profileSetup.doneBody}
-          </Text>
-        </View>
-      </Screen>
-    );
-  }
 
   const stepIndex = STEP_ORDER.indexOf(step);
 
@@ -190,7 +156,7 @@ export default function ProfileSetupRoute() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.progress}>
-          {STEP_ORDER.slice(0, 4).map((item, index) => (
+          {STEP_ORDER.map((item, index) => (
             <View
               key={item}
               style={[
@@ -222,13 +188,27 @@ export default function ProfileSetupRoute() {
               error={nicknameError}
               hint={
                 availability.state === 'checking'
-                  ? '확인 중…'
+                  ? copy.profileSetup.nicknameChecking
                   : availability.state === 'available'
-                    ? '사용할 수 있어요.'
-                    : undefined
+                    ? copy.profileSetup.nicknameAvailable
+                    : availability.state === 'unknown'
+                      ? copy.profileSetup.nicknameCheckFailed
+                      : undefined
               }
+              // 'forbidden'/'taken' already render via `nicknameError` above
+              // (the red error line); `hint` is the neutral/positive line and
+              // must not also claim something that isn't true for those.
               containerStyle={styles.field}
             />
+            {availability.state === 'taken' && availability.suggestion ? (
+              <Chip
+                label={copy.profileSetup.nicknameSuggestion(
+                  availability.suggestion,
+                )}
+                onPress={() => setNickname(availability.suggestion!)}
+                style={styles.suggestion}
+              />
+            ) : null}
           </View>
         ) : null}
 
@@ -348,6 +328,7 @@ const styles = StyleSheet.create({
   step: { paddingTop: spacing.xxl },
   hint: { marginTop: spacing.md },
   field: { marginTop: spacing.xl },
+  suggestion: { marginTop: spacing.sm, alignSelf: 'flex-start' },
   chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -355,7 +336,4 @@ const styles = StyleSheet.create({
   },
   chip: { marginRight: spacing.sm, marginBottom: spacing.sm },
   secondary: { marginTop: spacing.xs },
-  doneBody: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  doneGlyph: { fontSize: 64, marginBottom: spacing.xl },
-  doneText: { marginTop: spacing.base },
 });

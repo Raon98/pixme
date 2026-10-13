@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 
 import { haptics } from '@/lib/haptics';
-import { opacity, radius, spacing, useTheme } from '@/theme';
+import { layout, opacity, radius, spacing, useTheme } from '@/theme';
 import type { ThemeColors } from '@/theme/themes';
 
 import { Text, type TextTone } from './Text';
@@ -45,7 +45,7 @@ const SIZES: Record<
 > = {
   sm: { height: 36, paddingHorizontal: spacing.base, radius: radius.sm },
   md: { height: 46, paddingHorizontal: spacing.lg, radius: radius.md },
-  lg: { height: 54, paddingHorizontal: spacing.xl, radius: radius.base },
+  lg: { height: layout.buttonHeight, paddingHorizontal: spacing.xl, radius: radius.base },
 };
 
 function palette(

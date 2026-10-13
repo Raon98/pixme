@@ -13,6 +13,8 @@ import { logger } from '@/lib/logger';
 import { MOCK_MODE } from '@/lib/mock';
 import { secureStorage, storage, StorageKey } from '@/lib/storage';
 
+import { useGenerationStore } from '../generation/generationStore';
+
 const log = logger('auth');
 
 export type SessionState =
@@ -34,6 +36,12 @@ interface AuthState {
   applyAuthResponse: (response: AuthResponse) => Promise<void>;
   /** Re-fetches `/users/me` (after profile edits, purchases, etc.). */
   refreshUser: () => Promise<MeResponse | null>;
+  /**
+   * Swaps the access token for a freshly issued one. Server-side authority
+   * comes from the `profileCompleted` claim baked into the token, so finishing
+   * profile setup leaves the old token still asserting PENDING_PROFILE.
+   */
+  refreshSession: () => Promise<void>;
   setUser: (user: MeResponse) => void;
   signOut: (options?: { revokeRemote?: boolean }) => Promise<void>;
   /** Local-only teardown used when the refresh token is rejected. */
@@ -123,6 +131,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  async refreshSession() {
+    const refreshToken = get().refreshToken;
+    if (MOCK_MODE || !refreshToken) return;
+    try {
+      const tokens = await authApi.refresh(refreshToken);
+      await Promise.all([
+        secureStorage.set(StorageKey.AccessToken, tokens.accessToken),
+        secureStorage.set(StorageKey.RefreshToken, tokens.refreshToken),
+      ]);
+      set({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      });
+    } catch (error) {
+      log.warn('refreshSession failed', error);
+    }
+  },
+
   setUser(user) {
     set({ user, sessionState: resolveSessionState(user) });
   },
@@ -146,6 +172,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       storage.removeItem(StorageKey.PushTokenSynced),
       storage.removeItem(StorageKey.LastGenerationDraft),
     ]);
+    // The draft is module state, so it survives a sign-out that doesn't kill
+    // the process — and with it the chosen style. Signing in as someone else
+    // then left their picker showing a style the new account does not own,
+    // selected and ready to be rejected by the server on submit.
+    useGenerationStore.getState().clearDraft();
     analytics.identify(null);
     set({
       accessToken: null,

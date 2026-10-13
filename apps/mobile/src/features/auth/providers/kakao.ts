@@ -1,95 +1,36 @@
-import * as AuthSession from 'expo-auth-session';
-import * as Crypto from 'expo-crypto';
-
-import type { KakaoAuthRequest } from '@/api';
-import { config } from '@/lib/config';
+import { login } from '@react-native-seoul/kakao-login';
 
 import type { ProviderOutcome } from './apple';
 
-const KAKAO_AUTHORIZE_URL = 'https://kauth.kakao.com/oauth/authorize';
-
 /**
- * Kakao sign-in via the system browser (OAuth 2.0 + PKCE).
+ * Kakao sign-in via the native SDK (KakaoTalk app handoff, falling back to an
+ * in-app browser when KakaoTalk isn't installed).
  *
- * Deliberately not the Kakao native SDK: the authorization-code flow needs no
- * extra native module, works in Expo Go for development, and — crucially —
- * the code is exchanged for tokens *on our server*, so no Kakao client secret
- * ever ships inside the app.
+ * <p>Replaced the system-browser authorization-code flow this app started
+ * with: Kakao's own "리다이렉트 URI" registration only accepts http/https, never
+ * a custom URI scheme, so there was no way to register `pixme://oauth/kakao`
+ * at all. The native SDK sidesteps the redirect URI entirely — it talks to
+ * KakaoTalk directly via the app's platform registration (iOS bundle
+ * id / Android package + key hash in the Kakao console), not a web redirect.
+ *
+ * <p>Trade-off worth knowing: unlike the old flow, the access token now
+ * passes through this app (`AuthService.signInWithKakaoAccessToken` on the
+ * server calls Kakao's `/v2/user/me` with it once and never stores it) —
+ * the Kakao REST client secret still never ships in the bundle, only the
+ * already-public native app key does.
  */
-export async function signInWithKakao(): Promise<
-  ProviderOutcome<KakaoAuthRequest>
-> {
-  if (!config.kakao.restApiKey) return { status: 'unavailable' };
-
-  const redirectUri = AuthSession.makeRedirectUri({
-    scheme: 'pixme',
-    path: 'oauth/kakao',
-  });
-
-  const codeVerifier = base64UrlEncode(Crypto.getRandomBytes(32));
-  const codeChallenge = toBase64Url(
-    await Crypto.digestStringAsync(
-      Crypto.CryptoDigestAlgorithm.SHA256,
-      codeVerifier,
-      { encoding: Crypto.CryptoEncoding.BASE64 },
-    ),
-  );
-
-  const request = new AuthSession.AuthRequest({
-    clientId: config.kakao.restApiKey,
-    redirectUri,
-    responseType: AuthSession.ResponseType.Code,
-    scopes: ['profile_nickname'],
-    usePKCE: false, // we manage the verifier ourselves to forward it verbatim
-    extraParams: {
-      code_challenge: codeChallenge,
-      code_challenge_method: 'S256',
-    },
-  });
-
+export async function signInWithKakao(): Promise<ProviderOutcome<string>> {
   try {
-    const result = await request.promptAsync({
-      authorizationEndpoint: KAKAO_AUTHORIZE_URL,
-    });
-
-    if (result.type === 'cancel' || result.type === 'dismiss') {
+    const token = await login();
+    return { status: 'success', payload: token.accessToken };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // The native SDK signals a user-dismissed login as a rejected promise,
+    // not a distinct result type — matched by message rather than a typed
+    // cancellation, since that's all it gives us.
+    if (/cancel/i.test(message)) {
       return { status: 'cancelled' };
     }
-    if (result.type === 'error') {
-      return {
-        status: 'error',
-        error: new Error(result.error?.message ?? 'kakao authorize failed'),
-      };
-    }
-    if (result.type !== 'success') {
-      return { status: 'error', error: new Error('kakao authorize failed') };
-    }
-
-    const code = result.params.code;
-    if (!code) {
-      return {
-        status: 'error',
-        error: new Error(result.params.error ?? 'kakao authorize failed'),
-      };
-    }
-
-    return {
-      status: 'success',
-      payload: { authorizationCode: code, redirectUri, codeVerifier },
-    };
-  } catch (error) {
     return { status: 'error', error };
   }
-}
-
-function base64UrlEncode(bytes: Uint8Array): string {
-  const chars =
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-  let out = '';
-  for (const byte of bytes) out += chars[byte % chars.length];
-  return out;
-}
-
-function toBase64Url(base64: string): string {
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

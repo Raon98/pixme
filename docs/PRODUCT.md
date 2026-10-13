@@ -125,26 +125,32 @@ the person actually wore.
 
 ### Free generation is an onboarding grant, not a daily allowance
 
-There is **no** daily free generation. A new account gets three free chances,
-and they are deliberately three *different currencies* rather than a counter of
-three:
+There is **no** daily free generation. A new account gets two free chances,
+and they are deliberately two *different currencies* rather than a counter of
+two (changed from three — see below):
 
 | # | Currency | Scope |
 | --- | --- | --- |
 | 1 | First generation | Once per account. Nobody should pay to find out what the product does. |
 | 2 | First retry | Once, and **only on the first character's result screen**. |
-| 3 | Bonus free credit | One, usable any time afterwards. |
 
 After those, generation is paid.
 
 The retry exists for one reason: to stop someone leaving because the very first
 AI result disappointed them. So it is scoped to that moment and cannot be
-hoarded — a later "make another PIXME" spends the bonus credit, never the
-retry. Once it has been used, the user picks between the two candidates side by
-side, because comparing is much easier than remembering.
+hoarded. Once it has been used, the user picks between the two candidates side
+by side, because comparing is much easier than remembering.
 
-The bonus credit exists so a user can discover the thing the whole product rests
-on: *a different outfit produces a different PIXME.*
+**Changed 2026-10-07:** the third currency, a one-off bonus free credit usable
+any time after onboarding, was removed (`pixme.generation.onboarding-bonus-credits`
+default 1 → 0). Reason: at meaningful signup volume, every free chance is a
+guaranteed real AI-provider cost with no revenue attached, and the bonus credit
+was the one of the three that did not exist to rescue a specific moment (unlike
+the retry) — it was the easiest to cut without touching the first-impression
+safety net. The `SpendKind.FREE_BONUS` mechanism itself is untouched in code
+(so a future "watch a rewarded ad for one credit" relief valve or a manual grant
+can still use it); only the automatic onboarding grant amount changed, via one
+config value.
 
 Collapsing these into one number would lose exactly the distinctions that make
 them work — and would make a refund unable to give back the right thing, which

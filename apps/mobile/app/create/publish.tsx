@@ -1,12 +1,15 @@
 import { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
 
+import { pixelsApi } from '@/api';
 import { errorMessage } from '@/api/errors';
 import { copy } from '@/constants/copy';
 import { MOODS } from '@/constants/moods';
 import { normalizeTag, SUGGESTED_TAGS } from '@/constants/tags';
 import { config } from '@/lib/config';
+import { storage, StorageKey } from '@/lib/storage';
 import { opacity, radius, spacing, useTheme } from '@/theme';
 import {
   Button,
@@ -22,6 +25,7 @@ import { useGenerationStore } from '@/features/generation/generationStore';
 import { useKeepGeneration } from '@/features/generation/useKeepGeneration';
 import { useUpsertDailyStatus } from '@/features/dailyStatus/useUpsertDailyStatus';
 import { usePushRegistration } from '@/features/notifications/useNotifications';
+import { useMe } from '@/features/profile/useProfile';
 
 /**
  * Keep the new PIXME as Current, and optionally leave today's status.
@@ -48,12 +52,32 @@ export default function PublishRoute() {
   const toggleTag = useGenerationStore((state) => state.toggleTag);
 
   const keep = useKeepGeneration();
+  // The server is authoritative on this (it re-derives the same thing from
+  // UserSettings), but sending the honest value keeps the request truthful
+  // rather than relying on being overruled.
+  const keepOriginalPhoto = useMe().data?.settings.keepOriginalPhoto ?? true;
   const upsertStatus = useUpsertDailyStatus();
   const { promptNow } = usePushRegistration();
 
   const [customTag, setCustomTag] = useState('');
 
-  const generation = draft?.generation ?? null;
+  /**
+   * Same reasoning as the result screen: arriving from the "완성됐어요" push
+   * there is no in-memory draft at all, and mid-poll the one there is holds
+   * an in-progress snapshot with no image yet. The id travels in the route so
+   * this screen can stand on its own either way.
+   */
+  const { generationId } = useLocalSearchParams<{ generationId?: string }>();
+  const draftGeneration = draft?.generation ?? null;
+  const usableDraft = draftGeneration?.characterImageUrl ? draftGeneration : null;
+  const fetched = useQuery({
+    queryKey: ['pixels', 'generation', generationId],
+    queryFn: () => pixelsApi.generation(generationId!),
+    enabled: !usableDraft && !!generationId,
+    retry: 2,
+  });
+
+  const generation = usableDraft ?? fetched.data ?? draftGeneration ?? null;
   const isPending = keep.isPending || upsertStatus.isPending;
 
   const suggestions = useMemo(() => {
@@ -68,7 +92,7 @@ export default function PublishRoute() {
     try {
       const character = await keep.mutateAsync({
         generationId: generation.id,
-        body: { asCurrent: true, keepOriginal: true, label: null },
+        body: { asCurrent: true, keepOriginal: keepOriginalPhoto, label: null },
       });
 
       await upsertStatus.mutateAsync({
@@ -78,8 +102,10 @@ export default function PublishRoute() {
         pixelCharacterId: character.id,
       });
 
-      // First-keep moment: ask for notifications now.
+      // First-keep moment: ask for notifications now. Shares the "asked once"
+      // flag with the free status path so neither one asks twice.
       await promptNow();
+      await storage.setItem(StorageKey.PushPromptSeen, true);
 
       toast.show({
         message: copy.publish.successTitle,
@@ -107,7 +133,7 @@ export default function PublishRoute() {
         <Header title={copy.publish.title} onBack={() => router.back()} />
         <View style={styles.center}>
           <Text variant="body" tone="secondary" align="center">
-            먼저 PIXME를 만들어주세요.
+            {copy.create.needPixelFirst}
           </Text>
           <Button
             label={copy.today.emptyCta}
@@ -147,7 +173,7 @@ export default function PublishRoute() {
             uri={generation.characterImageUrl}
             size={150}
             idle
-            accessibilityLabel="오늘의 Current PIXME"
+            accessibilityLabel={copy.a11y.todayCurrentPixel}
           />
         </View>
 
@@ -213,7 +239,7 @@ export default function PublishRoute() {
           <TextField
             value={customTag}
             onChangeText={setCustomTag}
-            placeholder="직접 입력"
+            placeholder={copy.publish.customTagPlaceholder}
             maxLength={12}
             autoCapitalize="none"
             returnKeyType="done"
@@ -234,7 +260,7 @@ export default function PublishRoute() {
                   },
                 ]}
               >
-                추가
+                {copy.publish.addTag}
               </Text>
             }
           />
@@ -260,5 +286,5 @@ const styles = StyleSheet.create({
   customTag: { marginTop: spacing.sm },
   addTag: { paddingHorizontal: spacing.xs },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  cta: { marginTop: spacing.lg, minWidth: 180 },
+  cta: { marginTop: spacing.lg, minWidth: 180, alignSelf: 'center' },
 });

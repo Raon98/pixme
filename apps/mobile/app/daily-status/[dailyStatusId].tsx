@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { copy } from '@/constants/copy';
 import { moodEmoji, moodLabel } from '@/constants/moods';
 import { formatTag } from '@/constants/tags';
 import { formatCount, formatPostDate } from '@/lib/format';
@@ -17,6 +18,7 @@ import {
 } from '@/ui';
 import { useAuthStore } from '@/features/auth/authStore';
 import { useMyDailyStatusDetail } from '@/features/dailyStatus/useDailyStatusHistory';
+import { useShareStatus } from '@/features/share/useShareStatus';
 
 /**
  * A single day's status.
@@ -35,6 +37,13 @@ export default function DailyStatusDetailRoute() {
   const myId = useAuthStore((state) => state.user?.id ?? null);
 
   const status = useMyDailyStatusDetail(dailyStatusId);
+
+  const { share, sharing, sheet } = useShareStatus({
+    characterUrl: status.data?.characterImageUrl ?? null,
+    mood: status.data?.mood ?? null,
+    message: status.data?.message ?? null,
+    dateLabel: status.data ? formatPostDate(status.data.statusDate) : '',
+  });
 
   if (status.isPending) {
     return (
@@ -77,7 +86,7 @@ export default function DailyStatusDetailRoute() {
           uri={data.characterImageUrl}
           size={200}
           idle
-          accessibilityLabel="이 날의 PIXME"
+          accessibilityLabel={copy.a11y.thisDayPixel}
         />
       </View>
 
@@ -92,7 +101,7 @@ export default function DailyStatusDetailRoute() {
           variant="title2"
           align="center"
           style={styles.mood}
-          accessibilityLabel={`기분 ${moodLabel(data.mood)}`}
+          accessibilityLabel={copy.a11y.mood(moodLabel(data.mood))}
         >
           {moodEmoji(data.mood)}
         </Text>
@@ -115,14 +124,24 @@ export default function DailyStatusDetailRoute() {
         </Text>
       </View>
 
-      {!isOwner ? (
+      {isOwner ? (
         <Button
-          label="프로필 보기"
+          label={copy.share.cta}
+          variant="secondary"
+          loading={sharing}
+          onPress={() => void share()}
+          style={styles.shareButton}
+        />
+      ) : (
+        <Button
+          label={copy.profile.view}
           variant="ghost"
           onPress={() => router.push(`/user/${data.author.id}`)}
           style={styles.profileButton}
         />
-      ) : null}
+      )}
+
+      {sheet}
     </Screen>
   );
 }
@@ -155,4 +174,5 @@ const styles = StyleSheet.create({
   },
   heartText: { marginLeft: spacing.xs },
   profileButton: { marginTop: spacing.xxl },
+  shareButton: { marginTop: spacing.xxl, alignSelf: 'center', minWidth: 200 },
 });

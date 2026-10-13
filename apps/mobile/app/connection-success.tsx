@@ -15,8 +15,9 @@ import { useConnections } from '@/features/connections/useConnections';
  *
  * Shown once per connection. Tone matters a lot here: this is the moment the
  * app is most at risk of feeling like a dating match screen, so the copy
- * credits the PIXME ("오늘의 PIXME를 계기로"), the two characters simply stand
- * next to each other, and "나중에" is a first-class option.
+ * credits the PIXME (`reactions.connectedBody`), the two characters simply
+ * stand next to each other, and `reactions.connectedLater` is a first-class
+ * option.
  */
 export default function ConnectionSuccessRoute() {
   const { connectionId } = useLocalSearchParams<{ connectionId: string }>();
@@ -97,7 +98,9 @@ export default function ConnectionSuccessRoute() {
             idle
             idleVariant={1}
             accessibilityLabel={
-              connection ? `${connection.peer.nickname}의 PIXME` : 'PIXME'
+              connection
+                ? copy.a11y.userPixel(connection.peer.nickname)
+                : copy.brand.name
             }
           />
           <Text style={styles.spark}>✨</Text>

@@ -12,15 +12,20 @@ import { formatCount } from '@/lib/format';
 import { radius, spacing, useTheme } from '@/theme';
 import {
   Button,
+  HeartBurst,
   Icon,
   PixelCharacter,
   Sheet,
   Skeleton,
   Text,
+  TextField,
   useToast,
 } from '@/ui';
 
+import { ConnectionQuotaDialog } from '../connections/ConnectionQuotaDialog';
 import { useConnectionRequest } from '../connections/useConnectionRequest';
+import { burstFor } from '../decorations/catalog';
+import { useDecorations } from '../decorations/useDecorations';
 import { useHeart } from '../reactions/useHeart';
 
 export interface OccupantSheetProps {
@@ -31,7 +36,7 @@ export interface OccupantSheetProps {
 /**
  * Tapping someone in the square opens this. It is intentionally a peek, not a
  * profile: character, one line, mood, tags and the two reactions. Going deeper
- * is an explicit "프로필 보기".
+ * is an explicit `profile.view`.
  */
 export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
   const { colors } = useTheme();
@@ -41,6 +46,9 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
   const { toggleHeart } = useHeart();
   const connectionRequest = useConnectionRequest();
   const [localHearted, setLocalHearted] = useState<boolean | null>(null);
+  const [burstKey, setBurstKey] = useState(0);
+  const myDecorations = useDecorations();
+  const burst = burstFor(myDecorations.data?.active.PARTICLE);
 
   const query = useQuery({
     queryKey: qk.dailyStatus.detail(occupant?.dailyStatusId ?? 'none'),
@@ -60,6 +68,7 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
     const next = toggleHeart(status);
     setLocalHearted(next);
     if (next) {
+      setBurstKey((value) => value + 1);
       toast.show({
         message: copy.reactions.heartSent,
         tone: 'heart',
@@ -68,33 +77,46 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
     }
   }, [status, toggleHeart, toast]);
 
+  const [composingWave, setComposingWave] = useState(false);
+  const [waveText, setWaveText] = useState('');
+
   const onWave = useCallback(() => {
     if (!occupant) return;
     if (waveSent) {
       toast.show(copy.reactions.waveAlready);
       return;
     }
-    connectionRequest.mutate(
-      { userId: occupant.userId },
-      {
-        onSuccess: (response) => {
-          onClose();
-          if (response.connection) {
-            router.push({
-              pathname: '/connection-success',
-              params: { connectionId: response.connection.id },
-            });
-          } else {
-            toast.show({
-              message: copy.reactions.waveSent,
-              tone: 'wave',
-              icon: 'wave',
-            });
-          }
+    setComposingWave(true);
+  }, [occupant, toast, waveSent]);
+
+  const sendWave = useCallback(
+    (message: string | null) => {
+      if (!occupant) return;
+      connectionRequest.mutate(
+        { userId: occupant.userId, message },
+        {
+          onSuccess: (response) => {
+            setComposingWave(false);
+            setWaveText('');
+            onClose();
+            if (response.connection) {
+              router.push({
+                pathname: '/connection-success',
+                params: { connectionId: response.connection.id },
+              });
+            } else {
+              toast.show({
+                message: copy.reactions.waveSent,
+                tone: 'wave',
+                icon: 'wave',
+              });
+            }
+          },
         },
-      },
-    );
-  }, [connectionRequest, occupant, onClose, router, toast, waveSent]);
+      );
+    },
+    [connectionRequest, occupant, onClose, router, toast],
+  );
 
   const openProfile = useCallback(() => {
     if (!occupant) return;
@@ -104,15 +126,62 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
   }, [occupant, onClose, router]);
 
   return (
-    <Sheet visible={!!occupant} onClose={onClose}>
-      {occupant ? (
+    <>
+    <Sheet
+      visible={!!occupant}
+      onClose={() => {
+        setComposingWave(false);
+        setWaveText('');
+        onClose();
+      }}
+    >
+      {occupant && composingWave ? (
+        // Inline, not a second Modal: this Sheet is already a Modal, and a
+        // stacked one silently fails to present on iOS — see WaveComposeDialog.
+        <View>
+          <Text variant="title3" align="center">
+            {copy.reactions.waveComposeTitle}
+          </Text>
+          <Text variant="caption" tone="secondary" align="center" style={styles.composeBody}>
+            {copy.reactions.waveComposeBody}
+          </Text>
+          <TextField
+            value={waveText}
+            onChangeText={setWaveText}
+            placeholder={copy.reactions.waveComposePlaceholder}
+            maxLength={140}
+            showCounter
+            multiline
+            autoFocus
+            containerStyle={styles.composeField}
+          />
+          <Button
+            label={copy.reactions.waveComposeSend}
+            loading={connectionRequest.isPending}
+            onPress={() => sendWave(waveText.trim() || null)}
+          />
+          <Button
+            label={copy.reactions.waveComposeSkip}
+            variant="ghost"
+            disabled={connectionRequest.isPending}
+            onPress={() => sendWave(null)}
+            style={styles.composeSkip}
+          />
+        </View>
+      ) : occupant ? (
         <View>
           <View style={styles.hero}>
             <PixelCharacter
               uri={occupant.characterImageUrl}
               size={140}
               idle
-              accessibilityLabel={`${occupant.nickname}의 PIXME`}
+              accessibilityLabel={copy.a11y.userPixel(occupant.nickname)}
+            />
+            <HeartBurst
+              trigger={burstKey}
+              particles={burst.particles}
+              glyph={burst.glyph}
+              color={burst.color}
             />
           </View>
 
@@ -147,7 +216,9 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
                   variant="title2"
                   align="center"
                   style={styles.mood}
-                  accessibilityLabel={`기분 ${moodLabel((status?.mood ?? occupant.mood)!)}`}
+                  accessibilityLabel={copy.a11y.mood(
+                    moodLabel((status?.mood ?? occupant.mood)!),
+                  )}
                 >
                   {moodEmoji((status?.mood ?? occupant.mood)!)}
                 </Text>
@@ -191,12 +262,12 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
               style={styles.actionButton}
             />
             <Button
-              label={copy.reactions.wave}
+              label={waveSent ? copy.reactions.waveSentLabel : copy.reactions.wave}
               variant={waveSent ? 'secondary' : 'wave'}
               size="md"
               icon={
                 <Icon
-                  name="wave"
+                  name={waveSent ? 'check' : 'wave'}
                   size={18}
                   color={waveSent ? colors.textSecondary : colors.textOnAccent}
                 />
@@ -208,7 +279,7 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
           </View>
 
           <Button
-            label="프로필 보기"
+            label={copy.profile.view}
             variant="ghost"
             size="sm"
             onPress={openProfile}
@@ -216,6 +287,13 @@ export function OccupantSheet({ occupant, onClose }: OccupantSheetProps) {
         </View>
       ) : null}
     </Sheet>
+
+      <ConnectionQuotaDialog
+        visible={connectionRequest.quotaDialogVisible}
+        plusActive={connectionRequest.quotaDialogPlusActive}
+        onDismiss={connectionRequest.dismissQuotaDialog}
+      />
+    </>
   );
 }
 
@@ -225,6 +303,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingBottom: spacing.base,
   },
+  composeBody: { marginTop: spacing.md },
+  composeField: { marginTop: spacing.lg, marginBottom: spacing.lg },
+  composeSkip: { marginTop: spacing.xs },
   loading: { marginTop: spacing.base },
   center: { alignSelf: 'center' },
   caption: { marginTop: spacing.md },

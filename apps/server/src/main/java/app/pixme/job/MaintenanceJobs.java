@@ -1,11 +1,13 @@
 package app.pixme.job;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
 import app.pixme.auth.repository.RefreshTokenRepository;
 import app.pixme.common.ServiceClock;
 import app.pixme.config.PixmeProperties;
+import app.pixme.connection.repository.ConnectionRequestRepository;
 import app.pixme.feed.FeedExposureRepository;
 import app.pixme.pixel.GenerationService;
 import app.pixme.pixel.domain.PixelCharacter;
@@ -52,6 +54,7 @@ public class MaintenanceJobs {
     private final SquareService squareService;
     private final StoreService storeService;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final ConnectionRequestRepository connectionRequestRepository;
     private final StorageService storage;
     private final ServiceClock clock;
     private final PixmeProperties properties;
@@ -64,6 +67,7 @@ public class MaintenanceJobs {
             SquareService squareService,
             StoreService storeService,
             RefreshTokenRepository refreshTokenRepository,
+            ConnectionRequestRepository connectionRequestRepository,
             StorageService storage,
             ServiceClock clock,
             PixmeProperties properties) {
@@ -74,6 +78,7 @@ public class MaintenanceJobs {
         this.squareService = squareService;
         this.storeService = storeService;
         this.refreshTokenRepository = refreshTokenRepository;
+        this.connectionRequestRepository = connectionRequestRepository;
         this.storage = storage;
         this.clock = clock;
         this.properties = properties;
@@ -160,6 +165,19 @@ public class MaintenanceJobs {
         int removed = refreshTokenRepository.deleteExpired(Instant.now());
         if (removed > 0) {
             log.info("deleted {} expired refresh token(s)", removed);
+        }
+    }
+
+    /** Auto-cancels waves nobody answered within {@link #STALE_WAVE_AGE}. */
+    private static final Duration STALE_WAVE_AGE = Duration.ofDays(14);
+
+    @Scheduled(cron = "0 20 4 * * *")
+    @Transactional
+    public void cancelStaleConnectionRequests() {
+        int cancelled =
+                connectionRequestRepository.cancelStaleRequests(Instant.now().minus(STALE_WAVE_AGE));
+        if (cancelled > 0) {
+            log.info("auto-cancelled {} stale connection request(s)", cancelled);
         }
     }
 }

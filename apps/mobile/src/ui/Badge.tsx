@@ -1,5 +1,6 @@
 import { type StyleProp, StyleSheet, View, type ViewStyle } from 'react-native';
 
+import { copy } from '@/constants/copy';
 import { formatBadge } from '@/lib/format';
 import { radius, spacing, useTheme } from '@/theme';
 
@@ -28,7 +29,7 @@ export function Badge({ count, dot = false, tone = 'accent', style }: BadgeProps
     return (
       <View
         style={[styles.dot, { backgroundColor }, style]}
-        accessibilityLabel="새 소식"
+        accessibilityLabel={copy.a11y.newActivity}
       />
     );
   }
@@ -36,7 +37,7 @@ export function Badge({ count, dot = false, tone = 'accent', style }: BadgeProps
   return (
     <View
       style={[styles.badge, { backgroundColor }, style]}
-      accessibilityLabel={`${count}개`}
+      accessibilityLabel={copy.a11y.badgeCount(count ?? 0)}
     >
       <Text variant="micro" tone="onAccent" weight="bold">
         {formatBadge(count ?? 0)}

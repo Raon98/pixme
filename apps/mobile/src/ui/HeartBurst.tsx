@@ -13,12 +13,16 @@ import { useTheme } from '@/theme';
 
 import { Icon } from './Icon';
 
-/**
- * The heart reaction animation: a handful of small pixel hearts that pop out
- * and drift up. Deliberately restrained — the spec calls for "a small pixel
- * heart naturally popping out", not confetti.
- */
-const PARTICLES = [
+export interface HeartBurstParticle {
+  dx: number;
+  dy: number;
+  delay: number;
+  size: number;
+  rotate: number;
+}
+
+/** Deliberately restrained: "a small pixel heart popping out", not confetti. */
+const DEFAULT_PARTICLES: HeartBurstParticle[] = [
   { dx: 0, dy: -62, delay: 0, size: 26, rotate: 0 },
   { dx: -26, dy: -44, delay: 60, size: 16, rotate: -18 },
   { dx: 24, dy: -48, delay: 95, size: 18, rotate: 16 },
@@ -26,17 +30,37 @@ const PARTICLES = [
   { dx: 16, dy: -84, delay: 185, size: 13, rotate: 10 },
 ];
 
+/**
+ * The heart reaction animation: small pixel hearts that pop out and drift up.
+ *
+ * <p>Takes its particle layout from the caller so a purchased pixel effect can
+ * supply a richer one — this layer stays presentational and knows nothing
+ * about the store.
+ */
 export function HeartBurst({
   /** Increment to replay. */
   trigger,
+  particles = DEFAULT_PARTICLES,
+  glyph = 'heart',
+  color,
 }: {
   trigger: number;
+  particles?: HeartBurstParticle[];
+  /** Which mark flies out — a purchased effect can swap it. */
+  glyph?: 'heart' | 'star';
+  /** Overrides the theme's reaction colour. */
+  color?: string;
 }) {
   if (trigger === 0) return null;
   return (
     <View pointerEvents="none" style={styles.root}>
-      {PARTICLES.map((particle, index) => (
-        <Particle key={`${trigger}-${index}`} {...particle} />
+      {particles.map((particle, index) => (
+        <Particle
+          key={`${trigger}-${index}`}
+          {...particle}
+          glyph={glyph}
+          color={color}
+        />
       ))}
     </View>
   );
@@ -48,7 +72,9 @@ function Particle({
   delay,
   size,
   rotate,
-}: (typeof PARTICLES)[number]) {
+  glyph,
+  color,
+}: HeartBurstParticle & { glyph: 'heart' | 'star'; color?: string }) {
   const { colors } = useTheme();
   const progress = useSharedValue(0);
   const opacity = useSharedValue(0);
@@ -80,7 +106,11 @@ function Particle({
 
   return (
     <Animated.View style={[styles.particle, style]}>
-      <Icon name="heart-filled" size={size} color={colors.heart} />
+      <Icon
+        name={glyph === 'star' ? 'star-filled' : 'heart-filled'}
+        size={size}
+        color={color ?? colors.heart}
+      />
     </Animated.View>
   );
 }

@@ -215,7 +215,8 @@ cut (30%, or 15% on the small-business programme), and cost is roughly
 If that product is negative, the plan is subsidising usage.
 
 - Free generation is an onboarding grant only — first generation, one free
-  retry of that first result, one bonus credit — then paid. See `PRODUCT.md`.
+  retry of that first result — then paid (no bonus credit since 2026-10-07,
+  see `PRODUCT.md`).
 - A hard per-day cap (`pixme.generation.max-per-day`, default 20) as a backstop
   against a scripted client.
 - A 10/hour rate limit on the generation endpoint.

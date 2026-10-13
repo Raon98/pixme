@@ -27,7 +27,9 @@ import app.pixme.pixel.repository.UserCurrentPixelRepository;
 import app.pixme.reaction.repository.ReactionRepository;
 import app.pixme.safety.repository.BlockRepository;
 import app.pixme.storage.StorageService;
+import app.pixme.store.DecorationService;
 import app.pixme.store.StoreService;
+import app.pixme.store.domain.DecorationSlot;
 import app.pixme.user.UserService;
 import app.pixme.user.domain.User;
 import app.pixme.user.domain.UserProfile;
@@ -65,6 +67,7 @@ public class ResponseAssembler {
     private final ConnectionService connectionService;
     private final StoreService storeService;
     private final UserService userService;
+    private final DecorationService decorationService;
 
     public ResponseAssembler(
             UserProfileRepository profileRepository,
@@ -76,7 +79,8 @@ public class ResponseAssembler {
             StorageService storage,
             ConnectionService connectionService,
             StoreService storeService,
-            UserService userService) {
+            UserService userService,
+            DecorationService decorationService) {
         this.profileRepository = profileRepository;
         this.characterRepository = characterRepository;
         this.currentPixelRepository = currentPixelRepository;
@@ -87,6 +91,7 @@ public class ResponseAssembler {
         this.connectionService = connectionService;
         this.storeService = storeService;
         this.userService = userService;
+        this.decorationService = decorationService;
     }
 
     /* ----------------------------------------------------------------- me */
@@ -121,7 +126,9 @@ public class ResponseAssembler {
                         settings.isPushConnected(),
                         settings.isPushMessage(),
                         settings.isPushDailyReminder(),
-                        settings.isKeepOriginalPhoto()),
+                        settings.isKeepOriginalPhoto(),
+                        settings.isSquareVisible(),
+                        settings.isSquareOnboarded()),
                 user.getCreatedAt());
     }
 
@@ -177,6 +184,9 @@ public class ResponseAssembler {
                             : connectionService.relationStatus(viewerId, authorId).name());
         }
 
+        Map<UUID, Map<DecorationSlot, String>> decorations =
+                decorationService.activeFor(authorIds);
+
         List<DailyStatusDtos.StatusResponse> responses = new ArrayList<>(statuses.size());
         for (DailyStatus status : statuses) {
             UserProfile profile = profiles.get(status.getUserId());
@@ -187,7 +197,8 @@ public class ResponseAssembler {
                             status.getUserId().toString(),
                             nicknameOf(profile),
                             representativeUrls.get(status.getUserId()),
-                            relations.get(status.getUserId())),
+                            relations.get(status.getUserId()),
+                            decorationNames(decorations.get(status.getUserId()))),
                     character == null ? null : storage.characterUrl(character.getCharacterObjectKey()),
                     status.getMood(),
                     status.getMessage(),
@@ -306,6 +317,8 @@ public class ResponseAssembler {
                 statusSummaries(recentStatuses),
                 new UserDtos.PublicProfileResponse.PublicStats(
                         stats.getReceivedHeartCount(), stats.getPixelCount()),
+                storeService.isPlusActive(targetId),
+                decorationNames(decorationService.active(targetId)),
                 new UserDtos.RelationResponse(
                         targetId.equals(viewerId),
                         connectionService.relationStatus(viewerId, targetId).name(),
@@ -323,7 +336,18 @@ public class ResponseAssembler {
                 representativeUrl(userId),
                 userId.equals(viewerId)
                         ? ConnectionService.RelationStatus.NONE.name()
-                        : connectionService.relationStatus(viewerId, userId).name());
+                        : connectionService.relationStatus(viewerId, userId).name(),
+                decorationNames(decorationService.active(userId)));
+    }
+
+    /** Enum keys → wire-friendly slot names, with null meaning "nothing applied". */
+    private Map<String, String> decorationNames(Map<DecorationSlot, String> active) {
+        if (active == null || active.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> result = new HashMap<>(active.size());
+        active.forEach((slot, code) -> result.put(slot.name(), code));
+        return result;
     }
 
     /* --------------------------------------------------------------- chat */

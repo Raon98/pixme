@@ -21,4 +21,7 @@ public interface UserUnlockRepository extends JpaRepository<UserUnlock, UserUnlo
             @Param("userId") UUID userId, @Param("kind") String kind);
 
     boolean existsByKey(UserUnlock.Key key);
+
+    /** Used to claw back a style/decoration whose purchase the store revoked. */
+    void deleteByKey(UserUnlock.Key key);
 }

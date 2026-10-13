@@ -26,9 +26,32 @@ public record PixmeProperties(
         Push push,
         Purchase purchase,
         Privacy privacy,
-        RateLimit rateLimit) {
+        RateLimit rateLimit,
+        Connection connection,
+        Master master) {
 
     public record Maintenance(boolean active, String message) {}
+
+    /**
+     * Accounts that bypass every paywall: unlimited generation, PIXME+ always
+     * active. Two uses — the operator's own account, and a standing account
+     * for App Store / Play reviewers so they can reach every paid screen
+     * without a real purchase. Matched by the sign-in provider's email, so it
+     * follows an account across reinstalls without a DB flag to maintain.
+     */
+    public record Master(List<String> emails) {
+
+        public Master {
+            emails = emails == null ? List.of() : emails;
+        }
+
+        public boolean isMaster(String email) {
+            if (email == null || email.isBlank()) {
+                return false;
+            }
+            return emails.stream().anyMatch(email::equalsIgnoreCase);
+        }
+    }
 
     public record Auth(Jwt jwt, Apple apple, Kakao kakao) {
 
@@ -102,7 +125,10 @@ public record PixmeProperties(
      * Everything after that is paid.
      */
     public record Generation(
-            int onboardingBonusCredits, int maxPerDay, int maxCandidatesPerDay) {}
+            int onboardingBonusCredits,
+            int maxPerDay,
+            int maxCandidatesPerDay,
+            int globalMaxPerDay) {}
 
     public record Feed(
             int pageSize,
@@ -127,10 +153,20 @@ public record PixmeProperties(
                 String privateKey,
                 String rootCertificatesPath) {}
 
-        public record GooglePurchase(String packageName, String serviceAccountJson) {}
+        public record GooglePurchase(
+                String packageName, String serviceAccountJson, String webhookToken) {}
     }
 
     public record Privacy(Duration originalRetention, Duration deletionGracePeriod) {}
+
+    /**
+     * The daily cap on "👋 친해지고 싶어요" — the actual scarcity lever, distinct
+     * from {@link RateLimit#connectPerHour()} which exists only to blunt a
+     * burst/abuse pattern. This is the number the product cares about: too
+     * high and the gesture stops meaning anything, too low and PIXME+'s extra
+     * allowance isn't worth paying for.
+     */
+    public record Connection(int freeWavesPerDay, int plusWavesPerDay) {}
 
     public record RateLimit(
             int generationPerHour,

@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
 
+import { copy } from '@/constants/copy';
 import { radius, spacing, useTheme, zIndex } from '@/theme';
 
 import { IconButton } from './IconButton';
@@ -62,7 +63,7 @@ export function Sheet({
           <Pressable
             style={styles.scrimPress}
             accessibilityRole="button"
-            accessibilityLabel="닫기"
+            accessibilityLabel={copy.common.close}
             onPress={dismissible ? onClose : undefined}
           />
         </Animated.View>
@@ -92,7 +93,7 @@ export function Sheet({
                 ) : null}
               </View>
               {dismissible ? (
-                <IconButton label="닫기" onPress={onClose} size={32}>
+                <IconButton label={copy.common.close} onPress={onClose} size={32}>
                   <Icon name="close" size={20} color={colors.textSecondary} />
                 </IconButton>
               ) : null}

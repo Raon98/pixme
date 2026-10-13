@@ -38,6 +38,14 @@ public class AuthController {
         return toResponse(result);
     }
 
+    @PostMapping("/kakao/native")
+    public AuthDtos.SignInResponse kakaoNative(
+            @Valid @RequestBody AuthDtos.KakaoNativeSignInRequest request) {
+        AuthService.SignInResult result =
+                authService.signInWithKakaoAccessToken(request.accessToken());
+        return toResponse(result);
+    }
+
     @PostMapping("/refresh")
     public AuthDtos.TokensResponse refresh(
             @Valid @RequestBody AuthDtos.RefreshRequest request) {

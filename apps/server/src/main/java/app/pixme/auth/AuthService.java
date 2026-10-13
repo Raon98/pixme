@@ -77,6 +77,13 @@ public class AuthService {
         return completeSignIn(identity);
     }
 
+    /** Native Kakao SDK path — see {@link KakaoClient#identityFromAccessToken}. */
+    @Transactional
+    public SignInResult signInWithKakaoAccessToken(String accessToken) {
+        SocialIdentity identity = kakaoClient.identityFromAccessToken(accessToken);
+        return completeSignIn(identity);
+    }
+
     private SignInResult completeSignIn(SocialIdentity identity) {
         UserService.Resolution resolution = userService.findOrCreate(identity);
         User user = resolution.user();

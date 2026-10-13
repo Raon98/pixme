@@ -32,6 +32,12 @@ pixme:
     endpoint: http://localhost:9000
   purchase:
     allow-sandbox: true
+  generation:
+    # The bonus-credit mechanism itself is still exercised in tests even
+    # though production no longer grants it at onboarding (see
+    # application.yml) — this keeps that coverage independent of the
+    # product's current free-chances policy.
+    onboarding-bonus-credits: 1
 
 logging:
   level:

@@ -1,9 +1,11 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { copy } from '@/constants/copy';
 import { interestLabel } from '@/constants/interests';
-import { formatCount } from '@/lib/format';
+import { moodEmoji } from '@/constants/moods';
+import { formatCount, formatPostDate } from '@/lib/format';
 import { opacity, radius, spacing, useTheme } from '@/theme';
 import {
   Button,
@@ -19,9 +21,15 @@ import {
   Text,
 } from '@/ui';
 import { useMe } from '@/features/profile/useProfile';
+import { useShareStatus } from '@/features/share/useShareStatus';
 import { useMyHistory } from '@/features/dailyStatus/useDailyStatusHistory';
 import { useTodayStatus } from '@/features/feed/useTodayFeed';
 import { useCollection, useSetCurrentPixel } from '@/features/collection/useCollection';
+import { CharacterSheet } from '@/features/collection/CharacterSheet';
+import { DecoFrame } from '@/features/decorations/DecoFrame';
+import { DecoratedBackground } from '@/features/decorations/DecoratedBackground';
+import { NICKNAMES } from '@/features/decorations/catalog';
+import { useDecorations } from '@/features/decorations/useDecorations';
 
 /**
  * MY — a personal space, not a settings screen.
@@ -39,9 +47,58 @@ export default function MyRoute() {
   const history = useMyHistory();
   const collection = useCollection();
   const setCurrentPixel = useSetCurrentPixel();
+  const [openedCharacterId, setOpenedCharacterId] = useState<string | null>(null);
+
+  // Bound to the pull gesture only, not `me.isRefetching` — that flag also
+  // flips on the background refetch below (and on any other screen's
+  // invalidation of the same query), which showed the native pull spinner
+  // animating in on its own, with no pull behind it, right after landing
+  // here from the create flow.
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+
+  /**
+   * `representativeCharacterUrl` (and `myTodayStatus`) decide which CTA this
+   * screen shows — "오늘 상태 남기기" vs "PIXME 만들기" — and a session left
+   * open across several unrelated screens can be holding a `me` snapshot from
+   * well before the character this account already has. Same fix as Today's,
+   * for the same reason: refetch on arrival rather than trust however old the
+   * cache is.
+   */
+  const refetchMe = useRef(me.refetch);
+  useEffect(() => {
+    refetchMe.current = me.refetch;
+  });
+  useFocusEffect(
+    useCallback(() => {
+      void refetchMe.current();
+    }, []),
+  );
+
+  /**
+   * What the user actually bought, on the screen they bought it from. The
+   * decorations used to render only on the Today feed card, so applying one
+   * here changed nothing the owner could see — which read as the purchase
+   * silently failing.
+   */
+  const decorations = useDecorations().data?.active ?? {};
+  const nickname = decorations.NICKNAME ? NICKNAMES[decorations.NICKNAME] : undefined;
+  const openedCharacter =
+    collection.data?.find((item) => item.id === openedCharacterId) ?? null;
 
   const recent =
     history.data?.pages.flatMap((page) => page.items).slice(0, 8) ?? [];
+
+  // Before the early returns below — hooks cannot be conditional. Today's
+  // status is what makes a card worth sharing; without one it falls back to
+  // the representative character on its own.
+  const today = todayStatus.data?.myTodayStatus ?? null;
+  const shareCard = useShareStatus({
+    characterUrl:
+      today?.characterImageUrl ?? me.data?.representativeCharacterUrl ?? null,
+    mood: today?.mood ?? null,
+    message: today?.message ?? null,
+    dateLabel: today ? formatPostDate(today.statusDate) : '',
+  });
 
   if (me.isPending && !me.data) {
     return (
@@ -75,11 +132,18 @@ export default function MyRoute() {
       scrollProps={{
         refreshControl: (
           <RefreshControl
-            refreshing={me.isRefetching}
-            onRefresh={() => {
-              void me.refetch();
-              void history.refetch();
-              void todayStatus.refetch();
+            refreshing={manualRefreshing}
+            onRefresh={async () => {
+              setManualRefreshing(true);
+              try {
+                await Promise.all([
+                  me.refetch(),
+                  history.refetch(),
+                  todayStatus.refetch(),
+                ]);
+              } finally {
+                setManualRefreshing(false);
+              }
             }}
             tintColor={colors.accent}
           />
@@ -91,12 +155,22 @@ export default function MyRoute() {
         large
         title={copy.my.title}
         right={
-          <IconButton
-            label={copy.settings.title}
-            onPress={() => router.push('/settings')}
-          >
-            <Icon name="settings" size={22} color={colors.text} />
-          </IconButton>
+          <View style={styles.headerActions}>
+            {user.representativeCharacterUrl ? (
+              <IconButton
+                label={copy.share.cta}
+                onPress={() => void shareCard.share()}
+              >
+                <Icon name="share" size={22} color={colors.text} />
+              </IconButton>
+            ) : null}
+            <IconButton
+              label={copy.settings.title}
+              onPress={() => router.push('/settings')}
+            >
+              <Icon name="settings" size={22} color={colors.text} />
+            </IconButton>
+          </View>
         }
       />
 
@@ -108,6 +182,11 @@ export default function MyRoute() {
             { backgroundColor: colors.stage, borderColor: colors.border },
           ]}
         >
+          <DecoratedBackground
+            code={decorations.BACKGROUND}
+            fallback={[colors.stageTop, colors.stageBottom]}
+          />
+          <DecoFrame code={decorations.FRAME} radius={radius.xl} />
           <PixelCharacter
             uri={
               myToday?.characterImageUrl ??
@@ -115,11 +194,24 @@ export default function MyRoute() {
             }
             size={140}
             idle
-            accessibilityLabel="내 Current PIXME"
+            accessibilityLabel={copy.a11y.myCurrentPixel}
           />
         </View>
 
-        <Text variant="title2" style={styles.nickname}>
+        <Text
+          variant="title2"
+          style={[
+            styles.nickname,
+            nickname
+              ? {
+                  textShadowColor: nickname.glow,
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: nickname.radius,
+                  ...(nickname.color ? { color: nickname.color } : null),
+                }
+              : null,
+          ]}
+        >
           {user.nickname}
         </Text>
         {user.bio ? (
@@ -132,12 +224,12 @@ export default function MyRoute() {
           <View style={styles.todayStatusRow}>
             {myToday.mood || myToday.message ? (
               <Text variant="caption" tone="secondary" align="center" style={styles.todayStatusText}>
-                {myToday.mood ? `${myToday.mood} ` : ''}
+                {myToday.mood ? `${moodEmoji(myToday.mood)} ` : ''}
                 {myToday.message ?? ''}
               </Text>
             ) : null}
             <Button
-              label="오늘 상태 바꾸기"
+              label={copy.today.statusCta}
               variant="secondary"
               size="sm"
               fullWidth={false}
@@ -145,6 +237,16 @@ export default function MyRoute() {
               style={styles.todayCta}
             />
           </View>
+        ) : user.representativeCharacterUrl ? (
+          // Has a PIXME already — leaving today's status is free, so offer
+          // that rather than pushing another paid generation.
+          <Button
+            label={copy.today.statusCta}
+            size="md"
+            fullWidth={false}
+            onPress={() => router.push('/status-edit')}
+            style={styles.todayCta}
+          />
         ) : (
           <Button
             label={copy.today.myPixelMissingCta}
@@ -169,7 +271,79 @@ export default function MyRoute() {
         />
         <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
         <Stat label="PIXME" value={formatCount(user.stats.pixelCount)} />
+        {/*
+          Only once there is a streak to show. A prominent "0일" would read as
+          a scolding on day one, and the streak counts free daily activity, so
+          it must never look like something to be bought back.
+        */}
+        {user.stats.streakDays > 0 ? (
+          <>
+            <View
+              style={[styles.statDivider, { backgroundColor: colors.border }]}
+            />
+            <Stat
+              label={copy.profile.streak}
+              value={copy.profile.streakDays(user.stats.streakDays)}
+            />
+          </>
+        ) : null}
       </View>
+
+      {/* credit balance — always visible, always one tap from buying more */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={copy.a11y.buyCredits}
+        onPress={() => router.push('/store')}
+        style={({ pressed }) => [
+          styles.creditCard,
+          {
+            backgroundColor: colors.surfaceSubtle,
+            borderColor: colors.border,
+            opacity: pressed ? opacity.pressed : 1,
+          },
+        ]}
+      >
+        <Icon name="sparkle" size={18} color={colors.accent} />
+        <View style={styles.creditCardText}>
+          <Text variant="bodyStrong">
+            {copy.generation.balance(user.entitlements.creditBalance)}
+          </Text>
+          <Text variant="micro" tone="tertiary">
+            {user.entitlements.firstGenerationAvailable
+              ? copy.my.firstPixelFree
+              : user.entitlements.firstRetryAvailable
+                ? copy.my.firstRetryLeft
+                : copy.my.tapForMore}
+          </Text>
+        </View>
+        <Icon name="chevron-right" size={18} color={colors.textTertiary} />
+      </Pressable>
+
+      {/* Decorations — owned items are useless without a way in to apply them */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={copy.store.decorSection}
+        onPress={() => router.push('/decorations')}
+        style={({ pressed }) => [
+          styles.creditCard,
+          {
+            backgroundColor: colors.surfaceSubtle,
+            borderColor: colors.border,
+            opacity: pressed ? opacity.pressed : 1,
+          },
+        ]}
+      >
+        <Icon name="crown" size={18} color={colors.accent} />
+        <View style={styles.creditCardText}>
+          <Text variant="bodyStrong">{copy.store.decorSection}</Text>
+          <Text variant="micro" tone="tertiary">
+            {user.entitlements.plusActive
+              ? copy.my.decorPlus
+              : copy.my.decorHint}
+          </Text>
+        </View>
+        <Icon name="chevron-right" size={18} color={colors.textTertiary} />
+      </Pressable>
 
       {/* interests */}
       {user.interests.length > 0 ? (
@@ -227,7 +401,7 @@ export default function MyRoute() {
       <View style={styles.collectionHeader}>
         <Text variant="title3">PIXME Collection</Text>
         <Button
-          label="새 PIXME 만들기"
+          label={copy.collection.createCta}
           variant="ghost"
           size="sm"
           onPress={() => router.push('/create')}
@@ -244,9 +418,19 @@ export default function MyRoute() {
             <Pressable
               key={character.id}
               accessibilityRole="button"
-              accessibilityLabel={character.isCurrent ? '현재 사용 중인 PIXME' : '이 PIXME로 바꾸기'}
-              disabled={character.isCurrent || setCurrentPixel.isPending}
-              onPress={() => setCurrentPixel.mutate(character.id)}
+              accessibilityLabel={
+                character.isCurrent
+                  ? copy.collection.current
+                  : copy.a11y.collectionSwitch
+              }
+              accessibilityHint={copy.a11y.collectionHint}
+              disabled={setCurrentPixel.isPending}
+              onPress={() =>
+                character.isCurrent
+                  ? setOpenedCharacterId(character.id)
+                  : setCurrentPixel.mutate(character.id)
+              }
+              onLongPress={() => setOpenedCharacterId(character.id)}
               style={({ pressed }) => [
                 styles.collectionItem,
                 {
@@ -260,9 +444,17 @@ export default function MyRoute() {
               <PixelCharacter uri={character.characterImageUrl} size={72} />
               {character.isCurrent ? (
                 <Text variant="micro" tone="accent" style={styles.collectionLabel}>
-                  현재
+                  {copy.collection.currentShort}
                 </Text>
-              ) : null}
+              ) : (
+                // Without this, a non-current card is a plain thumbnail with
+                // no visible hint that tapping it switches Current PIXME —
+                // the tap handler above already does that, but nothing on
+                // screen said so.
+                <Text variant="micro" tone="tertiary" style={styles.collectionLabel}>
+                  {copy.collection.tapToSwitch}
+                </Text>
+              )}
             </Pressable>
           ))}
         </ScrollView>
@@ -270,7 +462,12 @@ export default function MyRoute() {
 
       <Divider style={styles.divider} />
 
-      {/* recent history */}
+      {/*
+        One entry point into /history, not two. This used to be headed
+        "최근의 나" with a separate "내 픽셀 기록" button below the preview grid
+        — same destination, two different names, which read as two unrelated
+        features. Now the preview itself is titled like the page it opens.
+      */}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={copy.my.history}
@@ -280,14 +477,14 @@ export default function MyRoute() {
           pressed ? { opacity: opacity.pressed } : null,
         ]}
       >
-        <Text variant="title3">{copy.profile.recent}</Text>
+        <Text variant="title3">{copy.my.history}</Text>
         <Icon name="chevron-right" size={18} color={colors.textTertiary} />
       </Pressable>
 
       {recent.length === 0 ? (
         <EmptyState
           compact
-          glyph="👾"
+          icon="calendar"
           title={copy.profile.emptyHistoryTitle}
           body={copy.profile.emptyHistoryBody}
           actionLabel={copy.today.emptyCta}
@@ -299,7 +496,7 @@ export default function MyRoute() {
             <Pressable
               key={status.id}
               accessibilityRole="button"
-              accessibilityLabel={`${status.statusDate}의 PIXME`}
+              accessibilityLabel={copy.a11y.dayPixel(status.statusDate)}
               onPress={() => router.push(`/daily-status/${status.id}`)}
               style={({ pressed }) => [
                 styles.gridItem,
@@ -319,13 +516,12 @@ export default function MyRoute() {
         </View>
       )}
 
-      <Button
-        label={copy.my.history}
-        variant="ghost"
-        size="sm"
-        onPress={() => router.push('/history')}
-        style={styles.historyButton}
+      <CharacterSheet
+        character={openedCharacter}
+        onClose={() => setOpenedCharacterId(null)}
       />
+
+      {shareCard.sheet}
     </Screen>
   );
 }
@@ -343,6 +539,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   content: { paddingBottom: spacing.giant },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
   hero: { alignItems: 'center', paddingTop: spacing.base },
   heroStage: {
     width: 168,
@@ -351,10 +548,16 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  nicknameGlow: {
+    textShadowColor: '#F9AE2B',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
   },
   nickname: { marginTop: spacing.base },
   bio: { marginTop: spacing.xs, maxWidth: 280 },
-  todayCta: { marginTop: spacing.base, minWidth: 180 },
+  todayCta: { marginTop: spacing.base, minWidth: 180, alignSelf: 'center' },
   todayStatusRow: { alignItems: 'center' },
   todayStatusText: { marginTop: spacing.sm, maxWidth: 280 },
   collectionHeader: {
@@ -383,6 +586,15 @@ const styles = StyleSheet.create({
   stat: { flex: 1, alignItems: 'center' },
   statLabel: { marginTop: spacing.xxs },
   statDivider: { width: StyleSheet.hairlineWidth, height: 28 },
+  creditCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xl,
+    padding: spacing.base,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  creditCardText: { flex: 1, marginLeft: spacing.sm },
   section: { marginTop: spacing.xl },
   chips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md },
   chip: { marginRight: spacing.xs, marginBottom: spacing.xs },
@@ -398,17 +610,16 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    // 23% + 2.6% margin × 4 = 102.4%, which wrapped the 4-up grid to 3.
+    gap: spacing.xs,
     marginTop: spacing.base,
   },
   gridItem: {
     width: '23%',
     aspectRatio: 0.82,
-    marginRight: '2.6%',
-    marginBottom: spacing.sm,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  historyButton: { marginTop: spacing.sm },
 });

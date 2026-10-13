@@ -18,6 +18,7 @@ import com.nimbusds.jose.crypto.ECDSAVerifier;
 import java.security.interfaces.ECPublicKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 /**
@@ -74,35 +75,10 @@ public class AppleReceiptVerifier implements ReceiptVerifier {
     @Override
     public VerifiedPurchase verify(String receipt, String expectedStoreProductId) {
         try {
-            JWSObject jws = JWSObject.parse(receipt);
-            JWSHeader header = jws.getHeader();
-
-            List<com.nimbusds.jose.util.Base64> chain = header.getX509CertChain();
-            if (chain == null || chain.isEmpty()) {
-                return VerifiedPurchase.invalid("missing x5c chain");
-            }
-
-            List<X509Certificate> certificates = parseChain(chain);
-            X509Certificate leaf = certificates.get(0);
-
-            Instant now = Instant.now();
-            for (X509Certificate certificate : certificates) {
-                certificate.checkValidity(java.util.Date.from(now));
-            }
-
-            if (!rootCertificates.isEmpty() && !isAnchored(certificates)) {
-                return VerifiedPurchase.invalid("certificate chain not anchored to Apple root");
-            }
-
-            PublicKey publicKey = leaf.getPublicKey();
-            if (!(publicKey instanceof ECPublicKey ecPublicKey)) {
-                return VerifiedPurchase.invalid("unexpected key type in leaf certificate");
-            }
-            if (!jws.verify(new ECDSAVerifier(ecPublicKey))) {
+            JsonNode payload = verifySignedPayload(receipt);
+            if (payload == null) {
                 return VerifiedPurchase.invalid("signature verification failed");
             }
-
-            JsonNode payload = objectMapper.readTree(jws.getPayload().toString());
 
             String bundleId = payload.path("bundleId").asText(null);
             if (bundleId == null || !bundleId.equals(config.bundleId())) {
@@ -190,12 +166,20 @@ public class AppleReceiptVerifier implements ReceiptVerifier {
         }
     }
 
+    /**
+     * Accepts a {@code classpath:} resource (how the bundled Apple Root CA -
+     * G3 ships, so verification works with zero configuration) or a plain
+     * filesystem path (for an operator who wants to mount a different/rotated
+     * certificate without a rebuild).
+     */
     private List<X509Certificate> loadRootCertificates(String path) {
         if (path == null || path.isBlank()) {
             return List.of();
         }
         try {
-            byte[] content = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(path));
+            byte[] content = path.startsWith("classpath:")
+                    ? new ClassPathResource(path.substring("classpath:".length())).getInputStream().readAllBytes()
+                    : java.nio.file.Files.readAllBytes(java.nio.file.Path.of(path));
             CertificateFactory factory = CertificateFactory.getInstance("X.509");
             return factory.generateCertificates(new ByteArrayInputStream(content)).stream()
                     .map(certificate -> (X509Certificate) certificate)
@@ -203,6 +187,61 @@ public class AppleReceiptVerifier implements ReceiptVerifier {
         } catch (Exception exception) {
             log.error("could not load Apple root certificates from {}", path, exception);
             return List.of();
+        }
+    }
+
+    /**
+     * Verifies an Apple-signed JWS's signature and certificate chain and
+     * returns its decoded payload — the same check {@link #verify} does, minus
+     * the receipt-specific business checks (bundleId, productId, environment).
+     *
+     * <p>Shared with the webhook handler: App Store Server Notifications V2
+     * wraps a {@code signedPayload}, and that payload's {@code data} carries
+     * further nested JWS values ({@code signedTransactionInfo},
+     * {@code signedRenewalInfo}) in exactly this same format, so one
+     * signature-checking method serves all three.
+     *
+     * @return the decoded payload, or {@code null} if the signature, chain, or
+     *     certificate validity could not be verified
+     */
+    public JsonNode verifySignedPayload(String jws) {
+        try {
+            JWSObject object = JWSObject.parse(jws);
+            JWSHeader header = object.getHeader();
+
+            List<com.nimbusds.jose.util.Base64> chain = header.getX509CertChain();
+            if (chain == null || chain.isEmpty()) {
+                log.warn("JWS missing x5c chain");
+                return null;
+            }
+
+            List<X509Certificate> certificates = parseChain(chain);
+            X509Certificate leaf = certificates.get(0);
+
+            Instant now = Instant.now();
+            for (X509Certificate certificate : certificates) {
+                certificate.checkValidity(java.util.Date.from(now));
+            }
+
+            if (!rootCertificates.isEmpty() && !isAnchored(certificates)) {
+                log.warn("certificate chain not anchored to Apple root");
+                return null;
+            }
+
+            PublicKey publicKey = leaf.getPublicKey();
+            if (!(publicKey instanceof ECPublicKey ecPublicKey)) {
+                log.warn("unexpected key type in leaf certificate");
+                return null;
+            }
+            if (!object.verify(new ECDSAVerifier(ecPublicKey))) {
+                log.warn("JWS signature verification failed");
+                return null;
+            }
+
+            return objectMapper.readTree(object.getPayload().toString());
+        } catch (Exception exception) {
+            log.warn("JWS verification failed", exception);
+            return null;
         }
     }
 

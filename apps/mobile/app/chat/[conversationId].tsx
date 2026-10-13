@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
   FlatList,
-  KeyboardAvoidingView,
+  Keyboard,
+  type KeyboardEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -75,6 +77,47 @@ export default function ChatRoute() {
   const [blockPrompt, setBlockPrompt] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
+  /**
+   * How much of the screen the keyboard currently covers, straight from the
+   * keyboard's own reported frame. `keyboardWillChangeFrame` also covers the
+   * cases a show/hide pair misses: the interactive dismiss drag, and swapping
+   * between a software and a hardware keyboard mid-thread.
+   */
+  const [keyboardOverlap, setKeyboardOverlap] = useState(0);
+
+  useEffect(() => {
+    const apply = (event: KeyboardEvent) => {
+      const screenHeight = Dimensions.get('screen').height;
+      setKeyboardOverlap(
+        Math.max(0, screenHeight - event.endCoordinates.screenY),
+      );
+    };
+
+    const subscriptions =
+      Platform.OS === 'ios'
+        ? [
+            Keyboard.addListener('keyboardWillChangeFrame', apply),
+            Keyboard.addListener('keyboardWillHide', () =>
+              setKeyboardOverlap(0),
+            ),
+          ]
+        : [
+            Keyboard.addListener('keyboardDidShow', apply),
+            Keyboard.addListener('keyboardDidHide', () =>
+              setKeyboardOverlap(0),
+            ),
+          ];
+
+    return () => subscriptions.forEach((subscription) => subscription.remove());
+  }, []);
+
+  /**
+   * The composer already reserves `insets.bottom` for the home indicator. A
+   * raised keyboard sits over that same strip, so the two do not add up — the
+   * larger of the pair is the whole clearance.
+   */
+  const composerBottomInset = Math.max(insets.bottom, keyboardOverlap);
+
   const items = useMemo(() => flattenMessages(messages.data), [messages.data]);
 
   useEffect(() => {
@@ -95,16 +138,22 @@ export default function ChatRoute() {
   const onSend = useCallback(() => {
     const value = draft;
     if (!value.trim()) return;
+    // Cleared optimistically so the composer feels instant, and put back
+    // verbatim if the send fails — losing what someone typed is worse than
+    // a moment of lag.
     setDraft('');
-    send(value);
-  }, [draft, send]);
+    send(value, (failed) => {
+      setDraft((current) => (current.length > 0 ? current : failed));
+      toast.show({ message: copy.chat.sendFailed, tone: 'error' });
+    });
+  }, [draft, send, toast]);
 
   const header = (
     <Header
       title={peer?.nickname ?? ''}
       subtitle={socketStatus === 'open' ? undefined : copy.chat.reconnecting}
       right={
-        <IconButton label="더보기" onPress={() => setMenuOpen(true)}>
+        <IconButton label={copy.a11y.more} onPress={() => setMenuOpen(true)}>
           <Icon name="more" size={20} color={colors.text} />
         </IconButton>
       }
@@ -144,7 +193,7 @@ export default function ChatRoute() {
         {peer ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${peer.nickname}의 프로필 열기`}
+            accessibilityLabel={copy.a11y.openProfile(peer.nickname)}
             onPress={() => router.push(`/user/${peer.id}`)}
             style={({ pressed }) => [
               styles.peerBar,
@@ -161,17 +210,22 @@ export default function ChatRoute() {
               ring="connection"
             />
             <Text variant="caption" tone="secondary" style={styles.peerText}>
-              오늘의 PIXME를 계기로 연결된 사이예요.
+              {copy.chat.peerConnected}
             </Text>
             <Icon name="chevron-right" size={16} color={colors.textTertiary} />
           </Pressable>
         ) : null}
 
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-        >
+        {/*
+          Deliberately not `KeyboardAvoidingView`. It derives its padding from
+          `onLayout`, whose coordinates are parent-relative, so everything this
+          screen puts above it (the header, the peer bar, `Screen`'s own top
+          inset) has to be compensated for by hand via `keyboardVerticalOffset`
+          — and getting that sum wrong is invisible until a device shows it,
+          which is exactly what kept happening. The keyboard reports its own
+          frame; using that directly needs no measurement and no correction.
+        */}
+        <View style={styles.flex}>
           <FlatList
             data={items}
             keyExtractor={(item) => item.id}
@@ -185,12 +239,18 @@ export default function ChatRoute() {
               }
             }}
             ListEmptyComponent={
-              <EmptyState
-                compact
-                glyph="💬"
-                title={copy.chat.emptyMessagesTitle}
-                body={copy.chat.systemConnected}
-              />
+              // `inverted` flips the whole content area with scaleY: -1, and
+              // ListEmptyComponent lives inside that transform — so the empty
+              // state rendered upside-down. Flipped back here rather than
+              // moved outside the list, so it still occupies the scroll area.
+              <View style={styles.invertedEmpty}>
+                <EmptyState
+                  compact
+                  glyph="💬"
+                  title={copy.chat.emptyMessagesTitle}
+                  body={copy.chat.systemConnected}
+                />
+              </View>
             }
             renderItem={({ item }) => (
               <MessageBubble message={item} mine={item.senderId === myId} />
@@ -201,7 +261,7 @@ export default function ChatRoute() {
             <View
               style={[
                 styles.disabledBar,
-                { borderTopColor: colors.border, paddingBottom: insets.bottom + spacing.md },
+                { borderTopColor: colors.border, paddingBottom: composerBottomInset + spacing.md },
               ]}
             >
               <Text variant="caption" tone="tertiary" align="center">
@@ -215,7 +275,7 @@ export default function ChatRoute() {
                 {
                   borderTopColor: colors.border,
                   backgroundColor: colors.background,
-                  paddingBottom: insets.bottom + spacing.sm,
+                  paddingBottom: composerBottomInset + spacing.sm,
                 },
               ]}
             >
@@ -238,7 +298,7 @@ export default function ChatRoute() {
                 ]}
               />
               <IconButton
-                label="보내기"
+                label={copy.a11y.send}
                 variant="surface"
                 size={40}
                 disabled={!draft.trim() || isPending}
@@ -260,7 +320,7 @@ export default function ChatRoute() {
               </IconButton>
             </View>
           )}
-        </KeyboardAvoidingView>
+        </View>
       </Screen>
 
       <Sheet
@@ -378,6 +438,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.base,
   },
+  /** Cancels the `inverted` FlatList's scaleY: -1 for the empty state. */
+  invertedEmpty: { transform: [{ scaleY: -1 }] },
   bubbleRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',

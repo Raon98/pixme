@@ -22,9 +22,9 @@ import { usePurchase } from '@/features/store/usePurchase';
 import { useThemePreference, type ThemePreference } from '@/theme';
 
 const THEME_LABEL: Record<ThemePreference, string> = {
-  light: '라이트',
-  dark: '다크',
-  system: '시스템 설정',
+  light: copy.settings.themeLight,
+  dark: copy.settings.themeDark,
+  system: copy.settings.themeSystem,
 };
 
 export default function SettingsRoute() {
@@ -78,7 +78,7 @@ export default function SettingsRoute() {
           onPress={() => router.push('/settings/blocked')}
         />
 
-        <SectionHeader title="개인정보" />
+        <SectionHeader title={copy.settings.privacySection} />
         <ListRow
           title={copy.settings.keepOriginal}
           subtitle={copy.settings.keepOriginalHint}
@@ -86,12 +86,14 @@ export default function SettingsRoute() {
           onPress={() => router.push('/settings/privacy')}
         />
 
-        <SectionHeader title="PIXME+" />
+        <SectionHeader title={copy.store.plusSection} />
         <ListRow
           title={copy.settings.plus}
           icon="crown"
           value={
-            me.data?.entitlements.plusActive ? '이용 중' : undefined
+            me.data?.entitlements.plusActive
+              ? copy.settings.plusActive
+              : undefined
           }
           onPress={() => router.push('/store/plus')}
         />
@@ -102,7 +104,7 @@ export default function SettingsRoute() {
           showChevron={false}
         />
 
-        <SectionHeader title="약관" />
+        <SectionHeader title={copy.settings.termsSection} />
         <ListRow
           title={copy.settings.terms}
           icon="info"
@@ -114,12 +116,12 @@ export default function SettingsRoute() {
           onPress={() => void Linking.openURL(config.links.privacy)}
         />
         <ListRow
-          title="문의하기"
+          title={copy.settings.support}
           icon="chat"
           onPress={() => void Linking.openURL(config.links.support)}
         />
 
-        <SectionHeader title="화면" />
+        <SectionHeader title={copy.settings.displaySection} />
         <ListRow
           title={copy.settings.theme}
           value={THEME_LABEL[preference]}

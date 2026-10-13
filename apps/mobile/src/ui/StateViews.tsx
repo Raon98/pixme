@@ -1,4 +1,10 @@
-import { type StyleProp, StyleSheet, View, type ViewStyle } from 'react-native';
+import {
+  Text as RNText,
+  type StyleProp,
+  StyleSheet,
+  View,
+  type ViewStyle,
+} from 'react-native';
 
 import { copy } from '@/constants/copy';
 import { errorMessage, toApiError } from '@/api/errors';
@@ -48,10 +54,15 @@ export function EmptyState({
         compact ? styles.compact : styles.full,
         style,
       ]}
-      accessibilityRole="summary"
     >
       {glyph ? (
-        <Text style={styles.glyph}>{glyph}</Text>
+        // Plain RN Text, not our themed `Text` — the themed component always
+        // sets an explicit `color`, and on iOS a colored foreground span on
+        // an emoji-only Text flattens the emoji to a monochrome blob instead
+        // of its real multi-color glyph. No color here lets it render native.
+        <RNText style={styles.glyph} allowFontScaling={false}>
+          {glyph}
+        </RNText>
       ) : icon ? (
         <View style={[styles.iconWrap, { backgroundColor: colors.surfaceSubtle }]}>
           <Icon name={icon} size={28} color={colors.textTertiary} />
@@ -147,5 +158,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.base,
   },
   body: { marginTop: spacing.sm, maxWidth: 280 },
-  action: { marginTop: spacing.lg, minWidth: 160 },
+  // `fullWidth={false}` makes Button default to `alignSelf: 'flex-start'`,
+  // which assumes a left-aligned parent — wrong here, where `root` centers
+  // everything else. Overridden back to 'center' so the button lines up with
+  // the glyph/title/body above it instead of hugging the left edge.
+  action: { marginTop: spacing.lg, minWidth: 160, alignSelf: 'center' },
 });

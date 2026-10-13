@@ -15,5 +15,7 @@ public enum CreditReason {
     GENERATION_REFUND,
     SUBSCRIPTION_GRANT,
     PROMOTION,
-    REWARD_AD
+    REWARD_AD,
+    /** The store revoked a purchase after the fact — a refund, a chargeback, family-sharing removal. */
+    REVOCATION
 }

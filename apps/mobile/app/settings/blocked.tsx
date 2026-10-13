@@ -84,7 +84,7 @@ export default function BlockedUsersRoute() {
                   {item.nickname}
                 </Text>
                 <Text variant="micro" tone="tertiary">
-                  {formatRelative(item.blockedAt)} 차단
+                  {copy.safety.blockedAt(formatRelative(item.blockedAt))}
                 </Text>
               </View>
               <Button
@@ -98,8 +98,7 @@ export default function BlockedUsersRoute() {
           )}
           ListFooterComponent={
             <Text variant="micro" tone="tertiary" style={styles.note}>
-              차단을 해제하면 서로의 PIXME가 다시 보일 수 있어요. 이전 대화는
-              복구되지 않아요.
+              {copy.safety.blockedNote}
             </Text>
           }
         />
@@ -107,8 +106,8 @@ export default function BlockedUsersRoute() {
 
       <ConfirmDialog
         visible={target !== null}
-        title={`${target?.nickname ?? ''} 차단을 해제할까요?`}
-        body="해제하면 서로의 오늘의 PIXME가 다시 보일 수 있어요."
+        title={copy.safety.unblockTitle(target?.nickname ?? '')}
+        body={copy.safety.unblockBody}
         confirmLabel={copy.safety.unblock}
         loading={unblock.isPending}
         onConfirm={() => {
@@ -116,7 +115,7 @@ export default function BlockedUsersRoute() {
           unblock.mutate(target.userId, {
             onSuccess: () => {
               setTarget(null);
-              toast.show({ message: '차단을 해제했어요.', tone: 'success' });
+              toast.show({ message: copy.safety.unblocked, tone: 'success' });
             },
             onError: () =>
               toast.show({ message: copy.errors.generic, tone: 'error' }),

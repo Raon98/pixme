@@ -12,6 +12,7 @@ import app.pixme.store.domain.GenerationCredit;
 import app.pixme.store.domain.SpendKind;
 import app.pixme.store.repository.CreditLedgerRepository;
 import app.pixme.store.repository.GenerationCreditRepository;
+import app.pixme.user.MasterAccountService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -49,14 +50,17 @@ public class CreditService {
     private final GenerationCreditRepository creditRepository;
     private final CreditLedgerRepository ledgerRepository;
     private final PixmeProperties properties;
+    private final MasterAccountService masterAccountService;
 
     public CreditService(
             GenerationCreditRepository creditRepository,
             CreditLedgerRepository ledgerRepository,
-            PixmeProperties properties) {
+            PixmeProperties properties,
+            MasterAccountService masterAccountService) {
         this.creditRepository = creditRepository;
         this.ledgerRepository = ledgerRepository;
         this.properties = properties;
+        this.masterAccountService = masterAccountService;
     }
 
     /**
@@ -90,8 +94,14 @@ public class CreditService {
         }
     }
 
+    /** Comfortably more than anyone will spend testing in a review pass. */
+    private static final int MASTER_CREDIT_BALANCE = 999_999;
+
     @Transactional(readOnly = true)
     public Allowance allowance(UUID userId) {
+        if (masterAccountService.isMaster(userId)) {
+            return new Allowance(true, true, 0, MASTER_CREDIT_BALANCE);
+        }
         return creditRepository
                 .findById(userId)
                 .map(this::toAllowance)
@@ -116,6 +126,23 @@ public class CreditService {
                         userId, properties.generation().onboardingBonusCredits())));
     }
 
+    /**
+     * Same as {@link #initialize}, but for an account whose social identity
+     * has deleted and re-signed up before — see
+     * {@link app.pixme.job.AccountPurgeJob}. The onboarding entitlements are
+     * created already spent, rather than withheld by some other means, so
+     * every other code path (free-generation checks, "N회 남았어요" copy) stays
+     * exactly as it is for a genuinely new account.
+     */
+    public GenerationCredit initializeAsReturning(UUID userId) {
+        return creditRepository.findById(userId).orElseGet(() -> {
+            GenerationCredit credit = GenerationCredit.createFor(userId, 0);
+            credit.consumeFirstGeneration();
+            credit.consumeFirstRetry();
+            return creditRepository.save(credit);
+        });
+    }
+
     /* ------------------------------------------------------------- spend */
 
     /**
@@ -126,6 +153,10 @@ public class CreditService {
      */
     @Transactional
     public SpendKind spendForGeneration(UUID userId, UUID generationId) {
+        if (masterAccountService.isMaster(userId)) {
+            return SpendKind.MASTER;
+        }
+
         GenerationCredit credit = lockOrCreate(userId);
 
         if (credit.isFirstGenerationAvailable()) {
@@ -185,6 +216,10 @@ public class CreditService {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean refund(UUID userId, UUID generationId, SpendKind spendKind) {
+        if (spendKind == SpendKind.MASTER) {
+            // Nothing was ever debited, so there is nothing to give back.
+            return true;
+        }
         if (spendKind == SpendKind.PAID_CREDIT
                 && ledgerRepository.existsByReferenceIdAndReason(
                         generationId, CreditReason.GENERATION_REFUND)) {
@@ -194,6 +229,7 @@ public class CreditService {
         GenerationCredit credit = lockOrCreate(userId);
 
         switch (spendKind) {
+            case MASTER -> throw new IllegalStateException("handled above");
             case FREE_FIRST -> credit.restoreFirstGeneration();
             case FREE_FIRST_RETRY -> credit.restoreFirstRetry();
             case FREE_BONUS -> credit.restoreBonusFreeCredit();
@@ -237,6 +273,52 @@ public class CreditService {
     @Transactional(readOnly = true)
     public List<CreditLedgerEntry> history(UUID userId, int limit) {
         return ledgerRepository.findByUserIdOrderByCreatedAtDesc(userId, PageRequest.of(0, limit));
+    }
+
+    /* --------------------------------------------------------- revocation */
+
+    /**
+     * Claws back credits a store purchase granted, because the store itself
+     * revoked that purchase — a refund, a chargeback, family-sharing removal.
+     *
+     * <p>Idempotent on {@code (referenceId, REVOCATION)}, since every store
+     * re-sends a webhook until it gets a 200 and the same revocation must not
+     * be applied twice. Clamped at zero rather than going negative: if the
+     * credits were already spent, there is nothing left to take back and the
+     * loss is absorbed, the same way a refund on an already-spent purchase
+     * would be at any digital goods store.
+     *
+     * <p>Runs in its own transaction, same as {@link #refund}, so it still
+     * lands even if the surrounding webhook-handling transaction rolls back.
+     *
+     * @return true when this call actually reclaimed something (false if it
+     *     was a duplicate notification already applied)
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean reclaim(UUID userId, int amount, UUID referenceId) {
+        if (amount <= 0) {
+            return false;
+        }
+        if (ledgerRepository.existsByReferenceIdAndReason(referenceId, CreditReason.REVOCATION)) {
+            return false;
+        }
+
+        GenerationCredit credit = lockOrCreate(userId);
+        int before = credit.getCreditCount();
+        credit.addCredits(-amount);
+        creditRepository.save(credit);
+
+        int actualDelta = credit.getCreditCount() - before;
+        ledgerRepository.save(CreditLedgerEntry.of(
+                userId, actualDelta, CreditReason.REVOCATION, credit.getCreditCount(), referenceId));
+
+        log.info(
+                "reclaimed {} (of {} requested) from user={} for revoked purchase={}",
+                actualDelta,
+                -amount,
+                userId,
+                referenceId);
+        return true;
     }
 
     private GenerationCredit lockOrCreate(UUID userId) {

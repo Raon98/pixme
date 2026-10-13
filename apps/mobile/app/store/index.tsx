@@ -22,7 +22,7 @@ import { usePurchase } from '@/features/store/usePurchase';
 import { useAuthStore } from '@/features/auth/authStore';
 
 /**
- * PIXME 스토어.
+ * The PIXME Store.
  *
  * Monetisation principle, enforced by what is (and isn't) sellable here:
  * relationships are free — hearts, waves, connections, chat, the feed and the
@@ -71,6 +71,8 @@ export default function StoreRoute() {
     const result = await restore();
     if (result.status === 'restored') {
       toast.show({ message: copy.store.restored, tone: 'success' });
+    } else if (result.status === 'owned-elsewhere') {
+      toast.show({ message: copy.store.ownedByAnotherAccount, tone: 'error' });
     } else if (result.status === 'empty') {
       toast.show(copy.store.nothingToRestore);
     } else {
@@ -121,15 +123,13 @@ export default function StoreRoute() {
           <View style={styles.balanceRow}>
             <Icon name="sparkle" size={20} color={colors.accent} />
             <Text variant="bodyStrong" style={styles.balanceText}>
-              생성권 {entitlements?.creditBalance ?? 0}개
+              {copy.generation.balance(entitlements?.creditBalance ?? 0)}
             </Text>
           </View>
           <Text variant="micro" tone="tertiary">
             {entitlements?.firstGenerationAvailable
-              ? '첫 PIXME는 무료로 만들 수 있어요.'
-              : (entitlements?.bonusFreeCredits ?? 0) > 0
-                ? copy.generation.bonusRemainingCount(entitlements!.bonusFreeCredits)
-                : '무료 생성을 모두 사용했어요.'}
+              ? copy.store.firstFree
+              : copy.store.firstFreeUsed}
           </Text>
         </Card>
 
@@ -197,8 +197,7 @@ export default function StoreRoute() {
         ) : null}
 
         <Text variant="micro" tone="tertiary" style={styles.legal}>
-          하트, 친해지고 싶어요, 연결, 대화는 언제나 무료예요. 결제는 스토어
-          계정으로 진행되고, 생성에 실패하면 사용된 생성권은 자동으로 돌려드려요.
+          {copy.store.legal}
         </Text>
       </ScrollView>
     </Screen>
@@ -255,7 +254,7 @@ function ProductRow({
         </View>
 
         <Button
-          label={product.owned ? '보유 중' : product.displayPrice}
+          label={product.owned ? copy.store.owned : product.displayPrice}
           size="sm"
           variant={product.owned ? 'outline' : 'primary'}
           disabled={product.owned}

@@ -17,6 +17,7 @@ import {
   ErrorState,
   GridSkeleton,
   Header,
+  HeartBurst,
   Icon,
   IconButton,
   PixelCharacter,
@@ -26,7 +27,13 @@ import {
   Text,
   useToast,
 } from '@/ui';
+import { DecoFrame } from '@/features/decorations/DecoFrame';
+import { DecoratedBackground } from '@/features/decorations/DecoratedBackground';
+import { burstFor, NICKNAMES } from '@/features/decorations/catalog';
+import { useDecorations } from '@/features/decorations/useDecorations';
 import { usePublicProfile } from '@/features/profile/useProfile';
+import { ConnectionQuotaDialog } from '@/features/connections/ConnectionQuotaDialog';
+import { WaveComposeDialog } from '@/features/connections/WaveComposeDialog';
 import { useConnectionRequest } from '@/features/connections/useConnectionRequest';
 import { useHeart } from '@/features/reactions/useHeart';
 import { useBlockUser } from '@/features/safety/useSafety';
@@ -48,16 +55,26 @@ export default function UserProfileRoute() {
   const connectionRequest = useConnectionRequest();
   const blockUser = useBlockUser();
   const { toggleHeart } = useHeart();
+  const myDecorations = useDecorations();
+  const burst = burstFor(myDecorations.data?.active.PARTICLE);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [blockPrompt, setBlockPrompt] = useState(false);
+  const [burstKey, setBurstKey] = useState(0);
+  const [composingWave, setComposingWave] = useState(false);
 
   const onWave = useCallback(() => {
     const relation = profile.data?.relation;
     if (!relation) return;
 
     if (relation.connectionStatus === 'CONNECTED') {
-      if (relation.conversationId) router.push(`/chat/${relation.conversationId}`);
+      if (relation.conversationId) {
+        router.push(`/chat/${relation.conversationId}`);
+      } else {
+        // Connected but the thread id didn't come back — rare, but a
+        // labelled primary button must never be a no-op.
+        toast.show({ message: copy.errors.generic, tone: 'error' });
+      }
       return;
     }
     if (relation.connectionStatus === 'REQUESTED_BY_ME') {
@@ -65,32 +82,41 @@ export default function UserProfileRoute() {
       return;
     }
 
-    connectionRequest.mutate(
-      { userId },
-      {
-        onSuccess: (response) => {
-          if (response.connection) {
-            router.push({
-              pathname: '/connection-success',
-              params: { connectionId: response.connection.id },
-            });
-          } else {
-            toast.show({
-              message: copy.reactions.waveSent,
-              tone: 'wave',
-              icon: 'wave',
-            });
-          }
+    setComposingWave(true);
+  }, [profile.data?.relation, router, toast]);
+
+  const sendWave = useCallback(
+    (message: string | null) => {
+      connectionRequest.mutate(
+        { userId, message },
+        {
+          onSuccess: (response) => {
+            setComposingWave(false);
+            if (response.connection) {
+              router.push({
+                pathname: '/connection-success',
+                params: { connectionId: response.connection.id },
+              });
+            } else {
+              toast.show({
+                message: copy.reactions.waveSent,
+                tone: 'wave',
+                icon: 'wave',
+              });
+            }
+          },
+          onError: () => setComposingWave(false),
         },
-      },
-    );
-  }, [connectionRequest, profile.data?.relation, router, toast, userId]);
+      );
+    },
+    [connectionRequest, router, toast, userId],
+  );
 
   const header = (
     <Header
       title={profile.data?.nickname ?? ''}
       right={
-        <IconButton label="더보기" onPress={() => setMenuOpen(true)}>
+        <IconButton label={copy.a11y.more} onPress={() => setMenuOpen(true)}>
           <Icon name="more" size={20} color={colors.text} />
         </IconButton>
       }
@@ -150,6 +176,18 @@ export default function UserProfileRoute() {
               { backgroundColor: colors.stage, borderColor: colors.border },
             ]}
           >
+            {/*
+              The owner's own decorations, exactly as they chose them. Half
+              the point of paying for a look is that visitors see it — until
+              now this screen quietly ignored it.
+            */}
+            <View style={[StyleSheet.absoluteFill, styles.heroStageClip]}>
+              <DecoratedBackground
+                code={user.decorations.BACKGROUND}
+                fallback={[colors.stageTop, colors.stageBottom]}
+              />
+            </View>
+            <DecoFrame code={user.decorations.FRAME} radius={radius.xl} />
             <PixelCharacter
               uri={
                 user.todayStatus?.characterImageUrl ??
@@ -157,13 +195,37 @@ export default function UserProfileRoute() {
               }
               size={132}
               idle
-              accessibilityLabel={`${user.nickname}의 Current PIXME`}
+              accessibilityLabel={copy.a11y.userCurrentPixel(user.nickname)}
+            />
+            {/*
+              Outside the clipped background layer above: the burst's particles
+              travel well past the 160×160 stage, and clipping them to it
+              defeated the whole effect.
+            */}
+            <HeartBurst
+              trigger={burstKey}
+              particles={burst.particles}
+              glyph={burst.glyph}
+              color={burst.color}
             />
           </View>
 
-          <Text variant="title2" style={styles.nickname}>
-            @{user.nickname}
-          </Text>
+          <View style={styles.nicknameRow}>
+            <Text
+              variant="title2"
+              style={nicknameStyle(user.decorations.NICKNAME)}
+            >
+              @{user.nickname}
+            </Text>
+            {/*
+              Profile only. The same marker on a feed card or a square occupant
+              would turn a crowd into a list of who pays, which is the opposite
+              of what PIXME+ is sold as.
+            */}
+            {user.plus ? (
+              <Chip label={copy.plus.title} size="sm" tone="accent" selected />
+            ) : null}
+          </View>
           {user.bio ? (
             <Text
               variant="caption"
@@ -219,6 +281,7 @@ export default function UserProfileRoute() {
                 if (!user.todayStatus) return;
                 const next = toggleHeart(user.todayStatus);
                 if (next) {
+                  setBurstKey((value) => value + 1);
                   toast.show({
                     message: copy.reactions.heartSent,
                     tone: 'heart',
@@ -233,9 +296,9 @@ export default function UserProfileRoute() {
           <Button
             label={
               connected
-                ? '대화 하기'
+                ? copy.reactions.connectedCta
                 : requested
-                  ? copy.reactions.waveAlready
+                  ? copy.reactions.waveSentLabel
                   : copy.reactions.wave
             }
             variant={connected ? 'primary' : requested ? 'outline' : 'wave'}
@@ -243,7 +306,7 @@ export default function UserProfileRoute() {
             loading={connectionRequest.isPending}
             icon={
               <Icon
-                name={connected ? 'chat' : 'wave'}
+                name={connected ? 'chat' : requested ? 'check' : 'wave'}
                 size={16}
                 color={
                   connected
@@ -261,8 +324,10 @@ export default function UserProfileRoute() {
 
         <View style={[styles.stats, { borderColor: colors.border }]}>
           <Text variant="micro" tone="tertiary">
-            받은 하트 {formatCount(user.stats.receivedHeartCount)} · PIXME{' '}
-            {formatCount(user.stats.pixelCount)}
+            {copy.profile.stats(
+              formatCount(user.stats.receivedHeartCount),
+              formatCount(user.stats.pixelCount),
+            )}
           </Text>
         </View>
 
@@ -275,8 +340,8 @@ export default function UserProfileRoute() {
         {user.recentStatuses.length === 0 ? (
           <EmptyState
             compact
-            glyph="👾"
-            title="아직 기록이 없어요."
+            icon="calendar"
+            title={copy.profile.emptyHistoryTitle}
           />
         ) : (
           <View style={styles.grid}>
@@ -338,6 +403,19 @@ export default function UserProfileRoute() {
         }}
         onCancel={() => setBlockPrompt(false)}
       />
+
+      <ConnectionQuotaDialog
+        visible={connectionRequest.quotaDialogVisible}
+        plusActive={connectionRequest.quotaDialogPlusActive}
+        onDismiss={connectionRequest.dismissQuotaDialog}
+      />
+
+      <WaveComposeDialog
+        visible={composingWave}
+        loading={connectionRequest.isPending}
+        onSend={sendWave}
+        onCancel={() => setComposingWave(false)}
+      />
     </>
   );
 }
@@ -353,7 +431,7 @@ function HistoryTile({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${status.statusDate}의 PIXME`}
+      accessibilityLabel={copy.a11y.dayPixel(status.statusDate)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.gridItem,
@@ -373,6 +451,18 @@ function HistoryTile({
   );
 }
 
+/** The owner's chosen nickname treatment, or nothing. */
+function nicknameStyle(code: string | undefined) {
+  const style = code ? NICKNAMES[code] : undefined;
+  if (!style) return null;
+  return {
+    textShadowColor: style.glow,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: style.radius,
+    ...(style.color ? { color: style.color } : null),
+  };
+}
+
 const styles = StyleSheet.create({
   content: { paddingBottom: spacing.giant },
   hero: { alignItems: 'center', paddingTop: spacing.base },
@@ -384,7 +474,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nickname: { marginTop: spacing.base },
+  heroStageClip: {
+    borderRadius: radius.xl,
+    overflow: 'hidden',
+  },
+  nicknameGlow: {
+    textShadowColor: '#F9AE2B',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+  },
+  nicknameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.base,
+  },
   bio: { marginTop: spacing.xs, maxWidth: 280 },
   chips: {
     flexDirection: 'row',
@@ -398,12 +502,12 @@ const styles = StyleSheet.create({
   stats: { alignItems: 'center', marginTop: spacing.base },
   divider: { marginTop: spacing.xl },
   sectionTitle: { marginTop: spacing.xl },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.base },
+  // See history.tsx — percentage margins are part of the margin box, so
+  // 31% + 3.5% never fit three across. `gap` does.
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.base },
   gridItem: {
     width: '31%',
     aspectRatio: 0.86,
-    marginRight: '3.5%',
-    marginBottom: spacing.sm,
     borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',

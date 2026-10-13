@@ -1,0 +1,375 @@
+/*
+ * PIXME web — the public site behind the URLs the app already links to
+ * (`termsUrl`, `privacyUrl`, `supportEmail` in apps/mobile/app.config.ts).
+ *
+ * Palette mirrors apps/mobile/src/theme/tokens.ts. Kept to one hand-written
+ * stylesheet with no build step: these are three mostly-static legal pages
+ * that must stay reachable for as long as the app is listed, so the fewer
+ * moving parts between the text and the browser, the better.
+ */
+
+:root {
+  --paper-0: #ffffff;
+  --paper-50: #fffdf8;
+  --paper-100: #fbf7ef;
+  --paper-200: #ede7db;
+  --paper-300: #dcd5c7;
+  --paper-500: #8e8778;
+  --paper-600: #6b6558;
+  --paper-700: #4c4740;
+  --paper-800: #2e2b26;
+  --violet-50: #f3f1fe;
+  --violet-500: #7c6cf0;
+  --violet-600: #6453dd;
+  --violet-700: #5243b4;
+
+  --measure: 42rem;
+  --radius: 14px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper-50);
+  color: var(--paper-800);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard',
+    'Segoe UI', Roboto, 'Noto Sans KR', sans-serif;
+  font-size: 17px;
+  line-height: 1.75;
+  word-break: keep-all; /* Korean wraps on word boundaries, not mid-word. */
+  overflow-wrap: break-word;
+}
+
+/* ------------------------------------------------------------------ layout */
+
+.wrap {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+.site-header {
+  border-bottom: 1px solid var(--paper-200);
+  background: var(--paper-50);
+}
+
+.site-header .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 64px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--paper-800);
+  text-decoration: none;
+}
+
+.brand img {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: block;
+}
+
+.site-nav {
+  display: flex;
+  gap: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.site-nav a {
+  color: var(--paper-600);
+  text-decoration: none;
+}
+
+.site-nav a:hover,
+.site-nav a[aria-current='page'] {
+  color: var(--violet-700);
+}
+
+main {
+  padding: 3rem 0 4rem;
+}
+
+.site-footer {
+  border-top: 1px solid var(--paper-200);
+  padding: 2rem 0 3rem;
+  color: var(--paper-500);
+  font-size: 0.85rem;
+}
+
+.site-footer a {
+  color: var(--paper-600);
+}
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+/*
+ * 전자상거래법 제10조 — mandatory seller-identity disclosure. Required on
+ * every page of a site that sells anything online, not just a terms page.
+ */
+.biz-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.1rem;
+  margin: 0 0 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--paper-200);
+  font-size: 0.82rem;
+  color: var(--paper-500);
+}
+
+.biz-info dt {
+  display: inline;
+  font-weight: 600;
+}
+
+.biz-info dt::after {
+  content: ': ';
+}
+
+.biz-info dd {
+  display: inline;
+  margin: 0 1.1rem 0 0;
+}
+
+/* --------------------------------------------------------------- landing */
+
+.hero {
+  text-align: center;
+  padding: 2rem 0 3.5rem;
+}
+
+.hero img {
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+  margin-bottom: 1.5rem;
+}
+
+.hero h1 {
+  font-size: clamp(2rem, 6vw, 2.75rem);
+  line-height: 1.25;
+  margin: 0 0 1rem;
+  letter-spacing: -0.02em;
+}
+
+.hero p {
+  color: var(--paper-600);
+  margin: 0 auto;
+  max-width: 30rem;
+}
+
+.cards {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  margin: 0 0 3rem;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  background: var(--paper-0);
+  border: 1px solid var(--paper-200);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.4rem;
+}
+
+.card h2 {
+  font-size: 1rem;
+  margin: 0 0 0.4rem;
+}
+
+.card p {
+  margin: 0;
+  color: var(--paper-600);
+  font-size: 0.93rem;
+  line-height: 1.65;
+}
+
+/* ------------------------------------------------------------------- text */
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.01em;
+}
+
+.doc h1 {
+  font-size: clamp(1.7rem, 5vw, 2.1rem);
+  margin: 0 0 0.5rem;
+}
+
+.doc > .meta {
+  color: var(--paper-500);
+  font-size: 0.88rem;
+  margin: 0 0 2.5rem;
+}
+
+.doc h2 {
+  font-size: 1.22rem;
+  margin: 3rem 0 0.9rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--paper-200);
+}
+
+.doc h3 {
+  font-size: 1rem;
+  margin: 1.8rem 0 0.6rem;
+}
+
+.doc p,
+.doc li {
+  color: var(--paper-700);
+}
+
+.doc ul,
+.doc ol {
+  padding-left: 1.3rem;
+}
+
+.doc li {
+  margin-bottom: 0.4rem;
+}
+
+.doc a {
+  color: var(--violet-700);
+}
+
+.lead {
+  background: var(--violet-50);
+  border: 1px solid #e6e2fd;
+  border-radius: var(--radius);
+  padding: 1.1rem 1.3rem;
+  margin: 0 0 2rem;
+  font-size: 0.95rem;
+}
+
+.lead p {
+  margin: 0;
+}
+
+.lead p + p {
+  margin-top: 0.6rem;
+}
+
+/* A value the operator must fill in before launch — deliberately loud. */
+.fill {
+  background: #fff3cd;
+  border-bottom: 2px solid #e5b700;
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ table */
+
+.table-scroll {
+  overflow-x: auto;
+  margin: 1.2rem 0;
+  border: 1px solid var(--paper-200);
+  border-radius: var(--radius);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+  background: var(--paper-0);
+}
+
+th,
+td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--paper-200);
+}
+
+th {
+  background: var(--paper-100);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* ------------------------------------------------------------------ misc */
+
+.toc {
+  background: var(--paper-100);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.3rem 1.1rem 2.4rem;
+  margin: 0 0 2rem;
+  font-size: 0.92rem;
+}
+
+.toc li {
+  margin-bottom: 0.25rem;
+}
+
+.button {
+  display: inline-block;
+  background: var(--violet-500);
+  color: var(--paper-0);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 0.7rem 1.4rem;
+  border-radius: 999px;
+}
+
+.button:hover {
+  background: var(--violet-600);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper-0: #141318;
+    --paper-50: #0f0e13;
+    --paper-100: #1b1a21;
+    --paper-200: #2b2934;
+    --paper-500: #8d89a0;
+    --paper-600: #a6a2b8;
+    --paper-700: #ccc9d8;
+    --paper-800: #f0eef7;
+    --violet-50: #1d1930;
+    --violet-700: #b0a5f7;
+  }
+
+  .lead {
+    border-color: #332b57;
+  }
+
+  .fill {
+    background: #4a3c00;
+    border-bottom-color: #e5b700;
+    color: #ffe9a3;
+  }
+}

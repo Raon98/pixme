@@ -17,7 +17,9 @@ import app.pixme.pixel.repository.PixelGenerationRepository;
 import app.pixme.pixel.repository.UserCurrentPixelRepository;
 import app.pixme.config.PixmeProperties;
 import app.pixme.storage.StorageService;
+import app.pixme.user.domain.UserSettings;
 import app.pixme.user.domain.UserStats;
+import app.pixme.user.repository.UserSettingsRepository;
 import app.pixme.user.repository.UserStatsRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +44,7 @@ public class PixelCharacterService {
     private final PixelGenerationRepository generationRepository;
     private final UserCurrentPixelRepository currentPixelRepository;
     private final UserStatsRepository statsRepository;
+    private final UserSettingsRepository settingsRepository;
     private final DailyStatusService dailyStatusService;
     private final StorageService storage;
     private final PixmeProperties properties;
@@ -51,6 +54,7 @@ public class PixelCharacterService {
             PixelGenerationRepository generationRepository,
             UserCurrentPixelRepository currentPixelRepository,
             UserStatsRepository statsRepository,
+            UserSettingsRepository settingsRepository,
             DailyStatusService dailyStatusService,
             StorageService storage,
             PixmeProperties properties) {
@@ -58,6 +62,7 @@ public class PixelCharacterService {
         this.generationRepository = generationRepository;
         this.currentPixelRepository = currentPixelRepository;
         this.statsRepository = statsRepository;
+        this.settingsRepository = settingsRepository;
         this.dailyStatusService = dailyStatusService;
         this.storage = storage;
         this.properties = properties;
@@ -90,11 +95,29 @@ public class PixelCharacterService {
             throw new ApiException(ErrorCode.GENERATION_NOT_COMPLETED);
         }
 
-        PixelCharacter character = PixelCharacter.keep(userId, generation, keepOriginal);
+        // The user's own retention setting wins over whatever the client asked
+        // for. 설정 > 개인정보's "원본 사진 보관" switch is a privacy promise, and a
+        // promise the client can override by sending `keepOriginal: true` is
+        // not one — so it is resolved here, on the authoritative side.
+        boolean retentionAllowed = settingsRepository
+                .findById(userId)
+                .map(UserSettings::isKeepOriginalPhoto)
+                .orElse(true);
+        boolean retainOriginal = keepOriginal && retentionAllowed;
+
+        PixelCharacter character = PixelCharacter.keep(userId, generation, retainOriginal);
         if (label != null && !label.isBlank()) {
             character.setLabel(label);
         }
         characterRepository.save(character);
+
+        // Not retaining means the photo is gone, not merely unreferenced:
+        // dropping the key alone would orphan the object in storage forever,
+        // since the retention sweep only ever looks at characters that still
+        // have one. "생성 직후 삭제" has to actually delete.
+        if (!retainOriginal && generation.getOriginalObjectKey() != null) {
+            storage.deleteOriginal(generation.getOriginalObjectKey());
+        }
 
         incrementCollectionCount(userId);
 

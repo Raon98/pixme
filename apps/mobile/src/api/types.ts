@@ -139,6 +139,8 @@ export interface UpdateMeRequest {
 export interface NicknameAvailability {
   available: boolean;
   reason?: 'TAKEN' | 'FORBIDDEN' | 'INVALID_FORMAT';
+  /** A free alternative when `reason === 'TAKEN'` (e.g. "지우" → "지우2"). */
+  suggestion?: string | null;
 }
 
 /** Another person's profile. Age and exact counts are intentionally coarse. */
@@ -151,6 +153,10 @@ export interface PublicProfile {
   todayStatus: DailyStatusEntry | null;
   recentStatuses: DailyStatusSummary[];
   stats: { receivedHeartCount: number; pixelCount: number };
+  /** On PIXME+. Marked on the profile only, never in the feed or the square. */
+  plus: boolean;
+  /** This person's active decorations, so their profile wears what they chose. */
+  decorations: AppliedDecorations;
   relation: UserRelation;
 }
 
@@ -261,11 +267,49 @@ export interface PixelCharacter {
   createdAt: string;
 }
 
+/** Where a decoration is applied. One active item per slot. */
+export type DecorationSlot =
+  | 'BACKGROUND'
+  | 'FRAME'
+  | 'PARTICLE'
+  | 'NICKNAME'
+  | 'THEME'
+  | 'POSE'
+  | 'EMOTION';
+
+/**
+ * Slot → unlock code the author has applied. The server has already dropped
+ * anything they may no longer use (a lapsed PIXME+ takes its items with it),
+ * so the client renders whatever arrives without re-checking entitlements.
+ */
+export type AppliedDecorations = Partial<Record<DecorationSlot, string>>;
+
+export interface DecorationItem {
+  unlockCode: string;
+  slot: DecorationSlot;
+  name: string;
+  description: string;
+  fallbackPriceKrw: number;
+  storeProductCode: string;
+  /** True when it can be applied right now. */
+  owned: boolean;
+  /** True when that right comes from PIXME+ and ends with the subscription. */
+  viaPlus: boolean;
+  /** Part of PIXME+ only — there is no individual price to show. */
+  plusOnly: boolean;
+}
+
+export interface DecorationsResponse {
+  items: DecorationItem[];
+  active: AppliedDecorations;
+}
+
 export interface PostAuthor {
   id: string;
   nickname: string;
   representativeCharacterUrl: string | null;
   connectionStatus: ConnectionStatus;
+  decorations?: AppliedDecorations;
 }
 
 /**
@@ -558,7 +602,13 @@ export interface VerifyPurchaseRequest {
 }
 
 export interface VerifyPurchaseResponse {
-  status: 'GRANTED' | 'ALREADY_GRANTED' | 'PENDING' | 'INVALID';
+  status:
+    | 'GRANTED'
+    | 'ALREADY_GRANTED'
+    /** Sold by the store to the underlying Apple/Play account, but already granted to a *different* PIXME account. */
+    | 'OWNED_BY_ANOTHER_ACCOUNT'
+    | 'PENDING'
+    | 'INVALID';
   entitlements: Entitlements;
 }
 

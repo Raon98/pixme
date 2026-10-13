@@ -138,7 +138,7 @@ public class UserController {
             @RequestParam @NotBlank String nickname) {
         UserService.NicknameAvailability availability = userService.checkNickname(nickname);
         return new UserDtos.NicknameAvailabilityResponse(
-                availability.available(), availability.reason());
+                availability.available(), availability.reason(), availability.suggestion());
     }
 
     @GetMapping("/interests")

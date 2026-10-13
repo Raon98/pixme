@@ -33,10 +33,12 @@ export type IconName =
   | 'check'
   | 'trash'
   | 'sparkle'
+  | 'star-filled'
   | 'flame'
   | 'moon'
   | 'refresh'
   | 'send'
+  | 'share'
   | 'crown'
   | 'flag'
   | 'block'
@@ -267,6 +269,16 @@ function renderPaths(name: IconName, stroke: string, c: Common) {
           <Path d="M10.2 19a1.9 1.9 0 0 0 3.6 0" {...c} />
         </>
       );
+    case 'star-filled':
+      return (
+        <Path
+          d="M12 3.6l2.5 5.4 5.9.7-4.4 4 1.2 5.8L12 16.6 6.8 19.5 8 13.7l-4.4-4 5.9-.7L12 3.6Z"
+          fill={stroke}
+          stroke={stroke}
+          strokeWidth={c.strokeWidth}
+          strokeLinejoin="round"
+        />
+      );
     case 'sparkle':
       return (
         <>
@@ -297,6 +309,16 @@ function renderPaths(name: IconName, stroke: string, c: Common) {
       );
     case 'send':
       return <Path d="M4.6 11.8 20 5l-6.5 15-2.4-6-6.5-2.2Z" {...c} />;
+    /* Box-with-an-arrow-out, matching the iOS share affordance people
+       already look for. */
+    case 'share':
+      return (
+        <>
+          <Path d="M12 3.5v11" {...c} />
+          <Path d="M8.5 7 12 3.5 15.5 7" {...c} />
+          <Path d="M6 11.5H4.8v8.2h14.4v-8.2H18" {...c} />
+        </>
+      );
     case 'crown':
       return (
         <Path

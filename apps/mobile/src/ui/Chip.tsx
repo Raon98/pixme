@@ -9,6 +9,7 @@ import {
 import { haptics } from '@/lib/haptics';
 import { opacity, radius, spacing, useTheme } from '@/theme';
 
+import { Emoji } from './Emoji';
 import { Text } from './Text';
 
 export interface ChipProps {
@@ -75,9 +76,9 @@ export function Chip({
       ]}
     >
       {prefix ? (
-        <Text variant={size === 'sm' ? 'micro' : 'caption'} style={styles.prefix}>
+        <Emoji size={size === 'sm' ? 11 : 13} style={styles.prefix}>
           {prefix}
-        </Text>
+        </Emoji>
       ) : null}
       <Text
         variant={size === 'sm' ? 'micro' : 'label'}

@@ -47,18 +47,29 @@ public class ConnectionRequest {
     @Column(name = "source_daily_status_id")
     private UUID sourceDailyStatusId;
 
+    /**
+     * An optional one-line note, sanitized the same as a bio. Sat on unseen
+     * (see the class doc) until the wave is mutual, at which point it becomes
+     * the conversation's opening message instead of a blank thread — see
+     * {@link app.pixme.connection.ConnectionService#request}.
+     */
+    @Column(name = "message", length = 140)
+    private String message;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 
-    public static ConnectionRequest create(UUID fromUserId, UUID toUserId, UUID sourceDailyStatusId) {
+    public static ConnectionRequest create(
+            UUID fromUserId, UUID toUserId, UUID sourceDailyStatusId, String message) {
         ConnectionRequest request = new ConnectionRequest();
         request.id = UUID.randomUUID();
         request.fromUserId = fromUserId;
         request.toUserId = toUserId;
         request.sourceDailyStatusId = sourceDailyStatusId;
+        request.message = message;
         request.status = ConnectionRequestStatus.REQUESTED;
         Instant now = Instant.now();
         request.createdAt = now;

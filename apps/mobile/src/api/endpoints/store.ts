@@ -20,10 +20,12 @@ export const storeApi = {
 
   /** Re-validates all known receipts for this account. */
   restorePurchases: (receipts: VerifyPurchaseRequest[]) =>
-    post<{ entitlements: Entitlements; restoredCount: number }>(
-      '/purchases/restore',
-      { receipts },
-    ),
+    post<{
+      entitlements: Entitlements;
+      restoredCount: number;
+      /** Sold to this device's Apple/Play account, but already granted elsewhere. */
+      ownedByAnotherAccountCount: number;
+    }>('/purchases/restore', { receipts }),
 
   credits: () => get<CreditSummary>('/credits'),
 

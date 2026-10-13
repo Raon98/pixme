@@ -18,6 +18,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByProviderAndProviderUserId(AuthProvider provider, String providerUserId);
 
+    @Query("select u from User u where lower(u.email) = lower(:email) and u.deletedAt is null")
+    Optional<User> findByEmailIgnoreCase(@Param("email") String email);
+
     @Query("select u from User u where u.id = :id and u.deletedAt is null")
     Optional<User> findActiveById(@Param("id") UUID id);
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -7,40 +7,77 @@ import { copy } from '@/constants/copy';
 import { MOODS } from '@/constants/moods';
 import { normalizeTag, SUGGESTED_TAGS } from '@/constants/tags';
 import { config } from '@/lib/config';
+import { storage, StorageKey } from '@/lib/storage';
 import { opacity, radius, spacing, useTheme } from '@/theme';
 import {
   Button,
   Chip,
+  ConfirmDialog,
   EmptyState,
+  ErrorState,
   Header,
+  ListSkeleton,
   PixelCharacter,
   Screen,
   Text,
   TextField,
   useToast,
 } from '@/ui';
+import { useMe } from '@/features/profile/useProfile';
 import { useTodayStatus } from '@/features/feed/useTodayFeed';
 import { useUpsertDailyStatus } from '@/features/dailyStatus/useUpsertDailyStatus';
+import { usePushRegistration } from '@/features/notifications/useNotifications';
 
 /**
- * "오늘 상태 바꾸기" — free, and completely independent of generating a new
+ * `copy.today.statusCta` — free, and completely independent of generating a new
  * PIXME. Changing the Current PIXME is a separate, paid-or-not decision made
  * on the create flow; this screen only ever touches mood/message/tags.
  */
 export default function StatusEditRoute() {
   const router = useRouter();
   const toast = useToast();
+  const { promptNow } = usePushRegistration();
   const { colors } = useTheme();
 
   const todayStatus = useTodayStatus();
   const upsertStatus = useUpsertDailyStatus();
+  const me = useMe();
 
+  /** Today's status, if one has already been left. Null is the normal case. */
   const existing = todayStatus.data?.myTodayStatus ?? null;
+
+  /**
+   * What this screen actually requires is a *character* — the status points at
+   * one. It used to gate on `existing` instead, which meant anyone who had not
+   * yet left today's status (that is, everyone this screen is for) was told to
+   * go and make a PIXME they already had. Leaving a status was only ever
+   * reachable as an edit of one that somehow already existed.
+   */
+  const characterUrl =
+    existing?.characterImageUrl ?? me.data?.representativeCharacterUrl ?? null;
 
   const [mood, setMood] = useState<string | null>(existing?.mood ?? null);
   const [message, setMessage] = useState(existing?.message ?? '');
   const [tags, setTags] = useState<string[]>(existing?.tags ?? []);
   const [customTag, setCustomTag] = useState('');
+  const [askingPush, setAskingPush] = useState(false);
+
+  /**
+   * `useState` initial values are only read on the first render, and on a
+   * cold open `todayStatus` has not resolved yet — so the form used to come
+   * up blank and then overwrite today's real mood/message/tags with that
+   * blankness on submit, since the request is a full upsert. Seeded once,
+   * when the data actually lands, and never again (so it can't stomp on
+   * edits in progress when the query refetches).
+   */
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !existing) return;
+    seeded.current = true;
+    setMood(existing.mood ?? null);
+    setMessage(existing.message ?? '');
+    setTags(existing.tags ?? []);
+  }, [existing]);
 
   const suggestions = useMemo(() => {
     const extras = tags.filter((tag) => !SUGGESTED_TAGS.includes(tag));
@@ -69,22 +106,69 @@ export default function StatusEditRoute() {
         message: message.trim() || null,
         tags,
       });
-      toast.show({ message: '오늘의 상태를 남겼어요.', tone: 'success', icon: 'sparkle' });
-      router.back();
+      toast.show({
+        message: copy.today.statusDoneTitle,
+        tone: 'success',
+        icon: 'sparkle',
+      });
+
+      // Leaving a status is the first thing most people do, and for anyone who
+      // never buys a generation it is the only moment we get: the prompt used
+      // to live solely after a paid publish, so free users were never asked
+      // and had no way to hear about a like, a mutual 👋 or a message.
+      const alreadyAsked = await storage.getItem<boolean>(
+        StorageKey.PushPromptSeen,
+      );
+      if (alreadyAsked) {
+        router.back();
+        return;
+      }
+      setAskingPush(true);
     } catch (error) {
       toast.show({ message: errorMessage(error), tone: 'error' });
     }
   }, [message, mood, router, tags, toast, upsertStatus]);
 
-  if (todayStatus.isPending) return null;
+  const resolvePushPrompt = useCallback(
+    async (accepted: boolean) => {
+      setAskingPush(false);
+      await storage.setItem(StorageKey.PushPromptSeen, true);
+      // The OS dialog is only worth spending after our own explanation, since
+      // iOS never shows it a second time.
+      if (accepted) await promptNow();
+      router.back();
+    },
+    [promptNow, router],
+  );
 
-  if (!existing && !todayStatus.data) {
+  if (todayStatus.isPending || me.isPending) {
     return (
       <Screen edges={['top']}>
-        <Header title="오늘 상태 바꾸기" onBack={() => router.back()} />
+        <Header title={copy.today.statusCta} onBack={() => router.back()} />
+        <ListSkeleton />
+      </Screen>
+    );
+  }
+
+  // A load failure must not be dressed up as "you don't have a PIXME yet" —
+  // that reads as an empty account and pushes the user into the paid create
+  // flow to fix a network error.
+  if (todayStatus.isError) {
+    return (
+      <Screen edges={['top']}>
+        <Header title={copy.today.statusCta} onBack={() => router.back()} />
+        <ErrorState error={todayStatus.error} onRetry={() => void todayStatus.refetch()} />
+      </Screen>
+    );
+  }
+
+  if (!characterUrl) {
+    return (
+      <Screen edges={['top']}>
+        <Header title={copy.today.statusCta} onBack={() => router.back()} />
         <EmptyState
-          glyph="👾"
-          title="먼저 PIXME를 만들어주세요."
+          icon="sparkle"
+          title={copy.create.needPixelFirst}
           actionLabel={copy.today.emptyCta}
           onAction={() => router.replace('/create')}
         />
@@ -96,34 +180,32 @@ export default function StatusEditRoute() {
     <Screen
       footer={
         <Button
-          label="오늘의 상태 남기기"
+          label={copy.today.statusCta}
           loading={upsertStatus.isPending}
           onPress={() => void onSubmit()}
         />
       }
     >
-      <Header title="오늘 상태 바꾸기" onBack={() => router.back()} />
+      <Header title={copy.today.statusCta} onBack={() => router.back()} />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.content}
       >
-        {existing?.characterImageUrl ? (
-          <View
-            style={[
-              styles.stage,
-              { backgroundColor: colors.stage, borderColor: colors.border },
-            ]}
-          >
-            <PixelCharacter
-              uri={existing.characterImageUrl}
-              size={120}
-              idle
-              accessibilityLabel="오늘의 Current PIXME"
-            />
-          </View>
-        ) : null}
+        <View
+          style={[
+            styles.stage,
+            { backgroundColor: colors.stage, borderColor: colors.border },
+          ]}
+        >
+          <PixelCharacter
+            uri={characterUrl}
+            size={120}
+            idle
+            accessibilityLabel={copy.a11y.todayCurrentPixel}
+          />
+        </View>
 
         <TextField
           label={copy.publish.captionLabel}
@@ -185,7 +267,7 @@ export default function StatusEditRoute() {
           <TextField
             value={customTag}
             onChangeText={setCustomTag}
-            placeholder="직접 입력"
+            placeholder={copy.publish.customTagPlaceholder}
             maxLength={12}
             autoCapitalize="none"
             returnKeyType="done"
@@ -203,12 +285,22 @@ export default function StatusEditRoute() {
                   },
                 ]}
               >
-                추가
+                {copy.publish.addTag}
               </Text>
             }
           />
         </View>
       </ScrollView>
+
+      <ConfirmDialog
+        visible={askingPush}
+        title={copy.notifications.promptTitle}
+        body={copy.notifications.promptBody}
+        confirmLabel={copy.notifications.promptAccept}
+        cancelLabel={copy.notifications.promptDecline}
+        onConfirm={() => void resolvePushPrompt(true)}
+        onCancel={() => void resolvePushPrompt(false)}
+      />
     </Screen>
   );
 }

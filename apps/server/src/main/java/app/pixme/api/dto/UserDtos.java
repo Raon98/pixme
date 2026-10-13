@@ -33,7 +33,7 @@ public final class UserDtos {
             Boolean keepOriginalPhoto,
             Boolean squareVisible) {}
 
-    public record NicknameAvailabilityResponse(boolean available, String reason) {}
+    public record NicknameAvailabilityResponse(boolean available, String reason, String suggestion) {}
 
     public record InterestResponse(String code, String label, String emoji) {}
 
@@ -56,6 +56,14 @@ public final class UserDtos {
             DailyStatusDtos.StatusResponse todayStatus,
             List<DailyStatusDtos.StatusSummaryResponse> recentStatuses,
             PublicStats stats,
+            /**
+             * Whether this person is on PIXME+. Shown as a quiet marker on the
+             * profile only — never in the feed or the square, where it would
+             * sort a crowd by who pays.
+             */
+            boolean plus,
+            /** Active decorations — background, frame, nickname, pixel effect. */
+            java.util.Map<String, String> decorations,
             RelationResponse relation) {
 
         public record PublicStats(int receivedHeartCount, int pixelCount) {}

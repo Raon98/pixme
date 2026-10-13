@@ -1,0 +1,21 @@
+{
+  "name": "pixme-promo",
+  "private": true,
+  "description": "PIXME 홍보 모션그래픽 — Remotion 소스. 앱 빌드와 완전히 분리됨.",
+  "scripts": {
+    "studio": "remotion studio",
+    "render:vertical": "remotion render Vertical out/pixme-vertical.mp4",
+    "render:horizontal": "remotion render Horizontal out/pixme-horizontal.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.535",
+    "@remotion/google-fonts": "^4.0.535",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.535"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "typescript": "^7.0.2"
+  }
+}

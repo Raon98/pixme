@@ -70,7 +70,12 @@ public final class PixelDtos {
             String id,
             String nickname,
             String representativeCharacterUrl,
-            String connectionStatus) {}
+            String connectionStatus,
+            /**
+             * Slot name → unlock code the author has applied, already filtered
+             * to what they may actually use. Empty when they decorate nothing.
+             */
+            Map<String, String> decorations) {}
 
     public record SignedUrlResponse(String url, Instant expiresAt) {}
 }

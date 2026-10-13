@@ -26,6 +26,9 @@ public final class AuthDtos {
             @NotBlank String redirectUri,
             String codeVerifier) {}
 
+    /** Native Kakao SDK path — the app already holds a Kakao access token. */
+    public record KakaoNativeSignInRequest(@NotBlank String accessToken) {}
+
     public record RefreshRequest(@NotBlank String refreshToken) {}
 
     public record LogoutRequest(String refreshToken) {}

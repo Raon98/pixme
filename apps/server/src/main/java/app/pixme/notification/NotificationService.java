@@ -113,10 +113,10 @@ public class NotificationService
         String groupKey = "HEART:" + dailyStatusId;
         long heartCount = reactionRepository.countByDailyStatusId(dailyStatusId);
 
-        String title = "♡ 하트를 받았어요";
+        String title = "♡ 좋아요를 받았어요";
         String body = heartCount <= 1
-                ? "누군가 오늘의 PIXME에 하트를 보냈어요."
-                : "%d명이 오늘의 PIXME에 하트를 보냈어요.".formatted(heartCount);
+                ? "누군가 오늘의 PIXME에 좋아요를 눌렀어요."
+                : "%d명이 오늘의 PIXME에 좋아요를 눌렀어요.".formatted(heartCount);
 
         String imageKey = statusRepository
                 .findById(dailyStatusId)
@@ -137,7 +137,7 @@ public class NotificationService
                         title,
                         body,
                         imageKey,
-                        "/today/" + dailyStatusId,
+                        "/daily-status/" + dailyStatusId,
                         groupKey));
 
         notificationRepository.save(notification);
@@ -145,43 +145,11 @@ public class NotificationService
         // Only push on the first heart of a group. Subsequent hearts update the
         // in-app row silently — the user doesn't need a buzz per heart.
         if (heartCount <= 1) {
-            push(authorId, title, body, "/today/" + dailyStatusId, false, "default");
+            push(authorId, title, body, "/daily-status/" + dailyStatusId, false, "default");
         }
     }
 
     /* -------------------------------------------------------- connections */
-
-    @Override
-    @Transactional
-    public void onConnectionRequested(UUID fromUserId, UUID toUserId) {
-        if (!settingOf(toUserId).map(UserSettings::isPushConnectionRequest).orElse(true)) {
-            return;
-        }
-
-        String title = "👋 누군가 친해지고 싶어해요";
-        String body = "오늘의 광장에서 당신의 PIXME를 보고 마음을 전했어요.";
-
-        // Grouped by day, and deliberately without the sender's identity.
-        String groupKey = "WAVE:" + java.time.LocalDate.now();
-
-        Notification notification = notificationRepository
-                .findByUserIdAndGroupKey(toUserId, groupKey)
-                .map(existing -> {
-                    existing.refresh(title, body);
-                    return existing;
-                })
-                .orElseGet(() -> Notification.create(
-                        toUserId,
-                        NotificationType.CONNECTION_REQUEST,
-                        title,
-                        body,
-                        null,
-                        "/(tabs)",
-                        groupKey));
-
-        notificationRepository.save(notification);
-        push(toUserId, title, body, "/(tabs)", false, "default");
-    }
 
     @Override
     @Transactional
@@ -255,17 +223,23 @@ public class NotificationService
         String title = "오늘의 PIXME가 완성됐어요";
         String body = "지금 바로 광장에 보내볼까요?";
 
+        // The id travels in the link because the result screen reads its
+        // generation from an in-memory draft that does not survive the app
+        // being closed — opening a bare /create/result from a push showed
+        // "실패했어요" for a generation that had in fact succeeded.
+        String deepLink = "/create/result?generationId=" + generationId;
+
         notificationRepository.save(Notification.create(
                 userId,
                 NotificationType.GENERATION_COMPLETED,
                 title,
                 body,
                 null,
-                "/create/result",
+                deepLink,
                 "GENERATION:" + generationId));
 
         // Worth a push: the user may well have left the app while waiting.
-        push(userId, title, body, "/create/result", false, "default");
+        push(userId, title, body, deepLink, false, "default");
     }
 
     @Override
@@ -340,7 +314,7 @@ public class NotificationService
         }
 
         String title = "🔥 오늘 PIXME 반응이 좋아요";
-        String body = "%d명이 하트를 보냈어요.".formatted(heartCount);
+        String body = "%d명이 좋아요를 눌렀어요.".formatted(heartCount);
 
         notificationRepository.save(Notification.create(
                 userId,
@@ -353,10 +327,10 @@ public class NotificationService
                         .flatMap(characterRepository::findAlive)
                         .map(PixelCharacter::getCharacterObjectKey)
                         .orElse(null),
-                "/today/" + dailyStatusId,
+                "/daily-status/" + dailyStatusId,
                 groupKey));
 
-        push(userId, title, body, "/today/" + dailyStatusId, false, "default");
+        push(userId, title, body, "/daily-status/" + dailyStatusId, false, "default");
     }
 
     /* ----------------------------------------------------------- read side */

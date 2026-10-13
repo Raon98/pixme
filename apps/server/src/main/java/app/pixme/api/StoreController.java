@@ -111,8 +111,10 @@ public class StoreController {
                     receipt.transactionId())));
         }
 
-        int restored = storeService.restore(principal.userId(), commands);
-        return new StoreDtos.RestoreResponse(entitlements(principal), restored);
+        StoreService.RestoreOutcome outcome =
+                storeService.restoreWithOutcome(principal.userId(), commands);
+        return new StoreDtos.RestoreResponse(
+                entitlements(principal), outcome.restored(), outcome.ownedByAnotherAccount());
     }
 
     @GetMapping("/entitlements")

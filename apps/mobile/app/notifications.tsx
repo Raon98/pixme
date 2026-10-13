@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 
 import type { AppNotification } from '@/api';
 import { copy } from '@/constants/copy';
+import { isSafeDeepLink } from '@/lib/deepLink';
 import { formatRelative } from '@/lib/format';
 import { opacity, radius, spacing, useTheme } from '@/theme';
 import {
@@ -134,7 +135,7 @@ export default function NotificationsRoute() {
               if (item.readAt === null) {
                 void notificationsApi.markRead(item.id);
               }
-              if (item.deepLink) router.push(item.deepLink as never);
+              if (isSafeDeepLink(item.deepLink)) router.push(item.deepLink as never);
             }}
           />
         )}

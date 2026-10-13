@@ -28,6 +28,9 @@ public interface PixelGenerationRepository extends JpaRepository<PixelGeneration
 
     long countByUserIdAndPostDate(UUID userId, LocalDate postDate);
 
+    /** Every account's generations today — the input to the global spend ceiling. */
+    long countByPostDate(LocalDate postDate);
+
     /** The newest completed-but-unkept candidate, used to resume the flow. */
     @Query("""
             select g from PixelGeneration g

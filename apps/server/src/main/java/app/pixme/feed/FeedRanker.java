@@ -59,7 +59,14 @@ public class FeedRanker {
             Map<UUID, Long> authorExposureCounts,
             Set<UUID> seenStatusIds,
             Set<UUID> heartedStatusIds,
-            Set<UUID> connectedUserIds,
+            /**
+             * Authors who waved at the viewer today and are still waiting —
+             * this is the entire visibility mechanism for a one-sided wave:
+             * there is no inbox, so surfacing the sender's card here is the
+             * only way the recipient ever has a chance to notice and wave
+             * back.
+             */
+            Set<UUID> wavedAtMeUserIds,
             /** Authors whose account is younger than a week. */
             Set<UUID> newUserIds) {}
 
@@ -109,9 +116,13 @@ public class FeedRanker {
             score += 22.0;
         }
 
-        /* --- already connected: keep them visible, but don't dominate ---- */
-        if (context.connectedUserIds().contains(status.getUserId())) {
-            score += 8.0;
+        // Already-connected authors and today's waved-at targets never reach
+        // this ranker at all — FeedService excludes them from the candidate
+        // query itself, so there is no score term for them here.
+
+        /* --- waved at me, unmatched: the only path to ever noticing it --- */
+        if (context.wavedAtMeUserIds().contains(status.getUserId())) {
+            score += 35.0;
         }
 
         /*

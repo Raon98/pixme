@@ -44,7 +44,8 @@ public final class StoreDtos {
 
     public record RestoreRequest(List<VerifyPurchaseRequest> receipts) {}
 
-    public record RestoreResponse(EntitlementsResponse entitlements, int restoredCount) {}
+    public record RestoreResponse(
+            EntitlementsResponse entitlements, int restoredCount, int ownedByAnotherAccountCount) {}
 
     /**
      * No {@code resetsAt}: free generation is an onboarding grant, not a daily

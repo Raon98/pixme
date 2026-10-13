@@ -14,6 +14,7 @@ interface RawExtra {
   kakaoRestApiKey?: string;
   kakaoNativeAppKey?: string;
   sentryDsn?: string;
+  facebookAppId?: string;
   termsUrl?: string;
   privacyUrl?: string;
   supportEmail?: string;
@@ -53,6 +54,11 @@ export const config = {
   },
 
   sentryDsn: extra.sentryDsn ?? '',
+
+  share: {
+    /** Empty when unset — the story hand-off degrades to the share sheet. */
+    facebookAppId: extra.facebookAppId ?? '',
+  },
 
   links: {
     terms: extra.termsUrl ?? 'https://pixme.app/terms',

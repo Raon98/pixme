@@ -181,10 +181,20 @@ pixme:
     # There is NO daily free generation. New users get: the first generation
     # free, one free retry of that first result, and this many bonus free
     # credits. After those, generation is paid.
-    onboarding-bonus-credits: ${PIXME_ONBOARDING_BONUS_CREDITS:1}
+    # Two free chances at signup, not three: the first generation and its
+    # one scoped retry. No separate bonus credit — cost per new signup is
+    # capped at two real AI calls, which matters once volume grows.
+    onboarding-bonus-credits: ${PIXME_ONBOARDING_BONUS_CREDITS:0}
     # Hard cap per day including paid credits — a backstop against runaway
     # spend from a scripted client.
     max-per-day: 20
+    # Whole-service ceiling for one day. The per-user caps bound what any one
+    # account can spend, but nothing bounded the total: a bug, a credential
+    # leak or a burst of signups would scale provider cost linearly with
+    # accounts and there would be no lever to pull. Deliberately set well above
+    # any plausible honest day so it only ever fires as a circuit breaker;
+    # raise it as real traffic grows.
+    global-max-per-day: ${PIXME_GLOBAL_MAX_GENERATIONS_PER_DAY:2000}
     # Candidates kept per day before older unpublished ones are pruned.
     max-candidates-per-day: 10
 
@@ -214,10 +224,19 @@ pixme:
       issuer-id: ${PIXME_APPLE_ISSUER_ID:}
       key-id: ${PIXME_APPLE_KEY_ID:}
       private-key: ${PIXME_APPLE_PRIVATE_KEY:}
-      root-certificates-path: ${PIXME_APPLE_ROOT_CERTS:}
+      # Apple Root CA - G3, bundled in resources — this is Apple's public
+      # root certificate (not a secret), used to anchor StoreKit 2's JWS
+      # certificate chain. Override via PIXME_APPLE_ROOT_CERTS to point at a
+      # mounted file instead, e.g. if Apple rotates the root.
+      root-certificates-path: ${PIXME_APPLE_ROOT_CERTS:classpath:pixme/certs/AppleRootCA-G3.cer}
     google:
       package-name: ${PIXME_GOOGLE_PACKAGE_NAME:com.pixme.app}
       service-account-json: ${PIXME_GOOGLE_SERVICE_ACCOUNT_JSON:}
+      # Google Play Real-time Developer Notifications arrive over Pub/Sub push
+      # with no built-in signature — this is the shared secret appended as a
+      # query param to the push endpoint URL configured in the Play Console
+      # (`.../webhooks/google?token=...`), so a request without it is rejected.
+      webhook-token: ${PIXME_GOOGLE_WEBHOOK_TOKEN:}
     # In non-production environments, accept sandbox receipts.
     allow-sandbox: ${PIXME_ALLOW_SANDBOX_RECEIPTS:false}
 
@@ -234,3 +253,14 @@ pixme:
     connect-per-hour: 60
     message-per-minute: 60
     report-per-day: 20
+
+  connection:
+    # The real scarcity control on "친해지고 싶어요" — see PixmeProperties.Connection.
+    free-waves-per-day: ${PIXME_FREE_WAVES_PER_DAY:2}
+    plus-waves-per-day: ${PIXME_PLUS_WAVES_PER_DAY:5}
+
+  master:
+    # Comma-separated emails, e.g. "me@kakao.com,reviewer@naver.com". Each
+    # must actually sign in once through a real provider before this takes
+    # effect — there is no way to pre-create the account itself.
+    emails: ${PIXME_MASTER_EMAILS:}

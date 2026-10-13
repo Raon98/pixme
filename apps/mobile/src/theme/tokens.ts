@@ -276,6 +276,13 @@ export const layout = {
   /** The raised centre "create" button diameter. */
   createButtonSize: 58,
   headerHeight: 52,
+  /**
+   * Height of a default (`lg`) Button. Lives here, not only in `Button.tsx`,
+   * because screens that size content around a pinned footer have to do that
+   * arithmetic themselves — and a copy of this number drifting out of sync is
+   * how content ends up painted underneath the footer.
+   */
+  buttonHeight: 54,
   maxContentWidth: 520,
   /** Feed card aspect ratio (portrait-ish, character centred). */
   feedCardAspect: 0.78,

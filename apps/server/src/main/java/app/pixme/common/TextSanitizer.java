@@ -52,13 +52,29 @@ public class TextSanitizer {
             Pattern.compile("(?i)(insta|인스타)\\s*[:＝=]?\\s*@?\\w{3,}"));
 
     /**
-     * Minimal slur / explicit-term blocklist. Kept short on purpose: an
-     * aggressive list produces false positives in Korean, and the real defence
-     * is report + review. Extend via configuration, not by growing this.
+     * Slur / explicit-term blocklist, grouped by why each term is here. Kept
+     * to clearly dehumanizing or explicit terms on purpose — a list aggressive
+     * enough to catch every possible phrasing produces false positives in
+     * Korean (common syllables inside ordinary words), and the real backstop
+     * for anything that slips through is report + review, not this list.
+     * Extend via configuration if this keeps growing, not by hand-editing it
+     * indefinitely.
      */
     private static final Set<String> BLOCKED_TERMS = Set.of(
-            "씨발", "병신", "좆", "보지", "자살", "강간", "섹파", "조건만남",
-            "fuck", "shit", "bitch", "rape", "nigger", "faggot");
+            // profanity
+            "씨발", "병신", "좆",
+            "ㅅㅂ", "ㅄ", "ㅂㅅ", "ㅈㄴ",
+            "fuck", "shit", "bitch",
+            // sexual / solicitation — this is not a dating app, and these are
+            // exactly the words that turn a nickname or bio into one
+            "보지", "자지", "섹스", "섹파", "조건만남", "성매매", "매춘", "떡치자", "몸캠",
+            "sex", "porn", "nude",
+            // self-harm / violent
+            "자살", "강간", "rape",
+            // dehumanizing slurs — ethnicity, disability, age, gender
+            "짱깨", "쪽바리", "왜놈", "흑형", "애자", "장애자",
+            "급식충", "맘충", "한남충", "김치녀", "틀딱",
+            "nigger", "faggot");
 
     public String normalize(String raw) {
         if (raw == null) {
@@ -147,9 +163,26 @@ public class TextSanitizer {
         return value;
     }
 
+    /**
+     * Leetspeak/repetition tricks that dodge a bare substring match: digits
+     * standing in for lookalike letters ({@code 시1발}), and a character
+     * repeated to break up the word ({@code ㅅㅂㅂㅂ}, {@code 시이발}). Applied on
+     * top of the existing separator-stripping fold, not instead of it.
+     *
+     * <p>Deliberately not attempting full Hangul jamo decomposition (ㅅ+ㅣ+ㅂ
+     * from 씨), since Korean consonant-only typing (ㅅㅂ, ㅄ) already passes
+     * through untouched by NFKC and is cheap to blocklist directly instead —
+     * see {@link #BLOCKED_TERMS}.
+     */
+    private static final Pattern LEET_DIGIT = Pattern.compile("[1](?=[가-힣a-z])");
+    private static final Pattern REPEATED_CHAR = Pattern.compile("(.)\\1{1,}");
+
     public boolean containsBlockedTerm(String value) {
-        String folded = value.toLowerCase(Locale.ROOT).replaceAll("[\\s._-]", "");
-        return BLOCKED_TERMS.stream().anyMatch(folded::contains);
+        String base = value.toLowerCase(Locale.ROOT).replaceAll("[\\s._-]", "");
+        String folded = LEET_DIGIT.matcher(base).replaceAll("이");
+        String collapsed = REPEATED_CHAR.matcher(folded).replaceAll("$1");
+        return BLOCKED_TERMS.stream()
+                .anyMatch(term -> folded.contains(term) || collapsed.contains(term));
     }
 
     public boolean containsContactInfo(String value) {

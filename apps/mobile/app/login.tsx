@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Linking, Platform, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { copy } from '@/constants/copy';
 import { config } from '@/lib/config';
@@ -70,25 +70,27 @@ export default function LoginRoute() {
         </Text>
 
         <View style={styles.legalLinks}>
-          <Text
-            variant="micro"
-            tone="secondary"
+          <Pressable
+            accessibilityRole="link"
+            hitSlop={12}
             onPress={() => void Linking.openURL(config.links.terms)}
-            style={styles.legalLink}
           >
-            {copy.settings.terms}
-          </Text>
+            <Text variant="micro" tone="secondary" style={styles.legalLink}>
+              {copy.settings.terms}
+            </Text>
+          </Pressable>
           <Text variant="micro" tone="tertiary">
             ·
           </Text>
-          <Text
-            variant="micro"
-            tone="secondary"
+          <Pressable
+            accessibilityRole="link"
+            hitSlop={12}
             onPress={() => void Linking.openURL(config.links.privacy)}
-            style={styles.legalLink}
           >
-            {copy.settings.privacy}
-          </Text>
+            <Text variant="micro" tone="secondary" style={styles.legalLink}>
+              {copy.settings.privacy}
+            </Text>
+          </Pressable>
         </View>
       </View>
     </Screen>

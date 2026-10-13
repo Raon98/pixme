@@ -1,6 +1,7 @@
 package app.pixme.connection;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -10,6 +11,8 @@ import app.pixme.chat.domain.Conversation;
 import app.pixme.common.ApiException;
 import app.pixme.common.ErrorCode;
 import app.pixme.common.RateLimiter;
+import app.pixme.common.ServiceClock;
+import app.pixme.common.TextSanitizer;
 import app.pixme.config.PixmeProperties;
 import app.pixme.connection.domain.Connection;
 import app.pixme.connection.domain.ConnectionRequest;
@@ -17,6 +20,8 @@ import app.pixme.connection.domain.ConnectionRequestStatus;
 import app.pixme.connection.repository.ConnectionRepository;
 import app.pixme.connection.repository.ConnectionRequestRepository;
 import app.pixme.safety.repository.BlockRepository;
+import app.pixme.store.StoreService;
+import app.pixme.user.MasterAccountService;
 import app.pixme.user.domain.User;
 import app.pixme.user.domain.UserStats;
 import app.pixme.user.repository.UserRepository;
@@ -50,6 +55,11 @@ public class ConnectionService {
     private final RateLimiter rateLimiter;
     private final PixmeProperties properties;
     private final ConnectionNotifier notifier;
+    private final StoreService storeService;
+    private final MasterAccountService masterAccountService;
+    private final ServiceClock clock;
+    private final TextSanitizer sanitizer;
+    private final ConnectionWriter connectionWriter;
 
     public ConnectionService(
             ConnectionRequestRepository requestRepository,
@@ -60,7 +70,12 @@ public class ConnectionService {
             ChatService chatService,
             RateLimiter rateLimiter,
             PixmeProperties properties,
-            ConnectionNotifier notifier) {
+            ConnectionNotifier notifier,
+            StoreService storeService,
+            MasterAccountService masterAccountService,
+            ServiceClock clock,
+            TextSanitizer sanitizer,
+            ConnectionWriter connectionWriter) {
         this.requestRepository = requestRepository;
         this.connectionRepository = connectionRepository;
         this.userRepository = userRepository;
@@ -70,6 +85,11 @@ public class ConnectionService {
         this.rateLimiter = rateLimiter;
         this.properties = properties;
         this.notifier = notifier;
+        this.storeService = storeService;
+        this.masterAccountService = masterAccountService;
+        this.clock = clock;
+        this.sanitizer = sanitizer;
+        this.connectionWriter = connectionWriter;
     }
 
     /** Relationship between the viewer and someone else, as the client sees it. */
@@ -86,10 +106,16 @@ public class ConnectionService {
     /* ------------------------------------------------------------ request */
 
     @Transactional
-    public RequestResult request(UUID fromUserId, UUID toUserId, UUID sourceDailyStatusId) {
+    public RequestResult request(
+            UUID fromUserId, UUID toUserId, UUID sourceDailyStatusId, String message) {
         if (fromUserId.equals(toUserId)) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "자신에게는 보낼 수 없어요.");
         }
+
+        String sanitizedMessage =
+                message == null || message.isBlank()
+                        ? null
+                        : sanitizer.sanitizeFreeText(message, 140, "메시지");
 
         rateLimiter.check(
                 "connect", fromUserId, properties.rateLimit().connectPerHour(), Duration.ofHours(1));
@@ -119,11 +145,25 @@ public class ConnectionService {
         Optional<ConnectionRequest> theirs =
                 requestRepository.findByFromUserIdAndToUserId(toUserId, fromUserId);
 
+        boolean mineWasPending = mine.isPresent() && mine.get().isPending();
+
+        if (!mineWasPending) {
+            // Every other branch below either returns early (idempotent) or
+            // is this user's own tap newly spending today's allowance — so
+            // the quota gate sits here, once, rather than duplicated in both
+            // the mutual-match and one-sided branches.
+            requireDailyWaveQuota(fromUserId);
+        }
+
         // Mutual: both sides have now waved.
         if (theirs.isPresent() && theirs.get().isPending()) {
             ConnectionRequest incoming = theirs.get();
-            ConnectionRequest outgoing = mine.orElseGet(
-                    () -> ConnectionRequest.create(fromUserId, toUserId, sourceDailyStatusId));
+            boolean outgoingIsNew = mine.isEmpty();
+            ConnectionRequest outgoing = mine.orElseGet(() ->
+                    ConnectionRequest.create(fromUserId, toUserId, sourceDailyStatusId, null));
+            if (outgoingIsNew) {
+                outgoing.setMessage(sanitizedMessage);
+            }
 
             incoming.setStatus(ConnectionRequestStatus.CONNECTED);
             outgoing.setStatus(ConnectionRequestStatus.CONNECTED);
@@ -131,7 +171,16 @@ public class ConnectionService {
             requestRepository.save(outgoing);
 
             Connection connection = createConnection(fromUserId, toUserId);
-            Conversation conversation = chatService.createForConnection(connection);
+            // In the order the waves actually happened, so a reply reads
+            // after the original rather than the two talking past each other.
+            List<ChatService.OpeningNote> notes = incoming.getCreatedAt().isBefore(outgoing.getCreatedAt())
+                    ? List.of(
+                            new ChatService.OpeningNote(incoming.getFromUserId(), incoming.getMessage()),
+                            new ChatService.OpeningNote(outgoing.getFromUserId(), outgoing.getMessage()))
+                    : List.of(
+                            new ChatService.OpeningNote(outgoing.getFromUserId(), outgoing.getMessage()),
+                            new ChatService.OpeningNote(incoming.getFromUserId(), incoming.getMessage()));
+            Conversation conversation = chatService.createForConnection(connection, notes);
 
             bumpConnectionCount(fromUserId);
             bumpConnectionCount(toUserId);
@@ -142,7 +191,7 @@ public class ConnectionService {
             return new RequestResult(RelationStatus.CONNECTED, connection, conversation.getId());
         }
 
-        if (mine.isPresent() && mine.get().isPending()) {
+        if (mineWasPending) {
             // Already waved; idempotent.
             return new RequestResult(RelationStatus.REQUESTED_BY_ME, null, null);
         }
@@ -150,13 +199,62 @@ public class ConnectionService {
         ConnectionRequest request = mine.map(existing -> {
                     existing.setStatus(ConnectionRequestStatus.REQUESTED);
                     existing.setSourceDailyStatusId(sourceDailyStatusId);
+                    existing.setMessage(sanitizedMessage);
                     return existing;
                 })
-                .orElseGet(() -> ConnectionRequest.create(fromUserId, toUserId, sourceDailyStatusId));
+                .orElseGet(() -> ConnectionRequest.create(
+                        fromUserId, toUserId, sourceDailyStatusId, sanitizedMessage));
         requestRepository.save(request);
 
-        notifier.onConnectionRequested(fromUserId, toUserId);
+        // No notification here, deliberately — see ConnectionNotifier. The
+        // recipient learns about this wave only by seeing the sender's card
+        // surfaced in their own feed (FeedRanker), never through a push.
         return new RequestResult(RelationStatus.REQUESTED_BY_ME, null, null);
+    }
+
+    /**
+     * The real scarcity control (see {@link PixmeProperties.Connection}).
+     * {@code connectPerHour} above is flood protection, not this — it is high
+     * enough that a normal user never notices it; this is low enough that
+     * they do, and PIXME+ raising it is the point.
+     */
+    private void requireDailyWaveQuota(UUID fromUserId) {
+        if (masterAccountService.isMaster(fromUserId)) {
+            return;
+        }
+        int limit = storeService.isPlusActive(fromUserId)
+                ? properties.connection().plusWavesPerDay()
+                : properties.connection().freeWavesPerDay();
+        Instant startOfToday = clock.today().atStartOfDay(clock.zone()).toInstant();
+        long sentToday = requestRepository.countByFromUserIdAndCreatedAtAfter(fromUserId, startOfToday);
+        if (sentToday >= limit) {
+            throw new ApiException(ErrorCode.DAILY_WAVE_LIMIT);
+        }
+    }
+
+    /**
+     * Connects two accounts directly — no waves, no quota, no notification
+     * check. Exists for exactly one caller, {@code ReservedSignupService}:
+     * two reserved identities that should already know each other the
+     * moment both have signed up. Idempotent, the same way the mutual-match
+     * path is — a connection that already exists between the two is left
+     * alone rather than duplicated.
+     */
+    @Transactional
+    public Connection connectDirectly(UUID userA, UUID userB) {
+        Optional<Connection> existing = findConnection(userA, userB);
+        if (existing.isPresent() && existing.get().isActive()) {
+            chatService.createForConnection(existing.get());
+            return existing.get();
+        }
+
+        Connection connection = createConnection(userA, userB);
+        Conversation conversation = chatService.createForConnection(connection);
+        bumpConnectionCount(userA);
+        bumpConnectionCount(userB);
+        notifier.onConnected(connection, conversation.getId());
+        log.info("directly connected {} and {} (reserved signup)", userA, userB);
+        return connection;
     }
 
     @Transactional
@@ -264,13 +362,30 @@ public class ConnectionService {
     }
 
     /**
-     * Inserts the connection, tolerating the race where both users' requests
-     * complete simultaneously — the unique index on the ordered pair rejects
-     * the loser, which then simply reads the winner's row.
+     * Gets the connection for this pair, inserting one if this is genuinely
+     * their first time or reviving the existing row if they connected and
+     * later ended it (unblock, un-severing) — the unique index is on the
+     * (userA, userB) pair forever, not on "their currently active
+     * connection", so a second match can never insert a second row for the
+     * same two people.
+     *
+     * <p>Also tolerates the race where both users' requests complete
+     * simultaneously: the unique index rejects the loser's insert, which
+     * then simply reads the winner's row.
      */
     private Connection createConnection(UUID first, UUID second) {
+        Optional<Connection> existing = findConnection(first, second);
+        if (existing.isPresent()) {
+            Connection connection = existing.get();
+            if (!connection.isActive()) {
+                connection.revive();
+                connectionRepository.save(connection);
+            }
+            return connection;
+        }
+
         try {
-            return connectionRepository.saveAndFlush(Connection.between(first, second));
+            return connectionWriter.insert(Connection.between(first, second));
         } catch (DataIntegrityViolationException exception) {
             return findConnection(first, second)
                     .orElseThrow(() -> new ApiException(ErrorCode.INTERNAL_ERROR));

@@ -33,10 +33,22 @@ export function useMe() {
 export function useUpdateMe() {
   const queryClient = useQueryClient();
   const setUser = useAuthStore((state) => state.setUser);
+  const refreshSession = useAuthStore((state) => state.refreshSession);
 
   return useMutation({
     mutationFn: (body: UpdateMeRequest) => usersApi.updateMe(body),
     onSuccess: async (me) => {
+      // The PATCH that finishes setup promotes the account server-side, but the
+      // access token still carries the old PENDING_PROFILE claim — without a
+      // re-issue every other endpoint keeps answering 403.
+      // Ordered deliberately: setUser flips the session to signed-in, which
+      // routes straight into the tabs, so the new token has to be in place
+      // before that happens or the first screen loads against a 403.
+      const wasPending =
+        useAuthStore.getState().sessionState === 'needs-profile';
+      if (wasPending && me.profileCompleted) {
+        await refreshSession();
+      }
       setUser(me);
       queryClient.setQueryData(qk.me.profile(), me);
       await queryClient.invalidateQueries({ queryKey: qk.users.profile(me.id) });
@@ -63,8 +75,21 @@ export function useNicknameAvailability(nickname: string, minLength: number) {
 
   if (!enabled) return { state: 'idle' as const };
   if (query.isPending) return { state: 'checking' as const };
-  if (query.isError) return { state: 'idle' as const };
-  return query.data?.available
-    ? { state: 'available' as const }
-    : { state: 'taken' as const, reason: query.data?.reason };
+  // A failed check must not block sign-up: mapping it to 'idle' left the
+  // "다음" button permanently disabled with nothing on screen explaining why,
+  // so a new user could get stuck on step 1 forever. Surfaced as its own
+  // state so the screen can say so and still let them continue — the server
+  // rejects a genuine duplicate on submit anyway.
+  if (query.isError) return { state: 'unknown' as const };
+  if (query.data?.available) return { state: 'available' as const };
+  // FORBIDDEN (a blocked term, an impersonation handle) is not the same
+  // situation as TAKEN — the two used to collapse into one 'taken' state,
+  // so a blocked nickname showed "이미 사용 중" even though no one has it.
+  // Only a real collision gets a next-best suggestion; there is no
+  // "try a variant" for a word that is blocked outright.
+  if (query.data?.reason === 'FORBIDDEN') return { state: 'forbidden' as const };
+  return {
+    state: 'taken' as const,
+    suggestion: query.data?.suggestion ?? undefined,
+  };
 }

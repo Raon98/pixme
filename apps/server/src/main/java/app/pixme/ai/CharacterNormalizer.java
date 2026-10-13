@@ -22,7 +22,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>So after generation every character is deterministically:
  * <ol>
- *   <li>trimmed to its transparent bounding box,
+ *   <li>alpha-binarised — every pixel forced fully transparent or fully
+ *       opaque, nothing in between,
+ *   <li>trimmed to its (now binary) bounding box,
  *   <li>scaled with <b>nearest-neighbour</b> so its height matches the spec —
  *       anything smoother would destroy the pixel edges that are the whole
  *       point,
@@ -30,6 +32,18 @@ import org.springframework.stereotype.Component;
  *       crowd,
  *   <li>centred horizontally, with the soles on the spec's baseline.
  * </ol>
+ *
+ * <p>The binarisation step exists because the prompt alone cannot be trusted
+ * to produce a genuinely transparent background: providers have repeatedly
+ * painted a soft vignette/glow hugging the character — alpha fading smoothly
+ * from ~255 at the silhouette down to 0 far out, never actually hitting zero
+ * nearby. That gradient cannot be told apart from real character pixels by
+ * alpha value alone at close range, so no amount of prompt wording fixes it
+ * completely. Binarising with a single cutoff can't perfectly separate "real
+ * edge" from "halo touching the edge" either, but it does two things reliably:
+ * it discards the entire outer falloff of any such gradient (which is most of
+ * its visible area), and it enforces the product's own "no anti-aliasing, no
+ * soft gradients" rule on the character's own silhouette as a side effect.
  *
  * <p>The art — the person, the outfit, the colours — is never touched. Only the
  * frame it sits in.
@@ -39,8 +53,15 @@ public class CharacterNormalizer {
 
     private static final Logger log = LoggerFactory.getLogger(CharacterNormalizer.class);
 
-    /** Below this alpha a pixel is treated as empty when finding the bounds. */
-    private static final int ALPHA_THRESHOLD = 12;
+    /**
+     * Alpha cutoff for binarisation: at or above this, a pixel becomes fully
+     * opaque; below it, fully transparent. Deliberately above the midpoint —
+     * erring toward discarding a borderline pixel (more likely to be
+     * background haze) rather than keeping it (which would re-introduce a
+     * soft edge). Tune by comparing real renders if character edges start
+     * looking eaten into, or if halos survive past this cutoff.
+     */
+    private static final int ALPHA_THRESHOLD = 160;
 
     private final MasterCharacterReference reference;
 
@@ -60,6 +81,7 @@ public class CharacterNormalizer {
             if (source == null) {
                 return pngBytes;
             }
+            source = binarizeAlpha(source);
 
             int[] bounds = alphaBounds(source);
             if (bounds == null) {
@@ -98,6 +120,23 @@ public class CharacterNormalizer {
             log.warn("character normalisation failed; using the raw render", exception);
             return pngBytes;
         }
+    }
+
+    /**
+     * Forces every pixel fully opaque or fully transparent — no gradient
+     * survives, including whatever a provider painted behind the character.
+     */
+    private BufferedImage binarizeAlpha(BufferedImage source) {
+        BufferedImage result = new BufferedImage(
+                source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                int argb = source.getRGB(x, y);
+                int alpha = (argb >>> 24) & 0xFF;
+                result.setRGB(x, y, alpha >= ALPHA_THRESHOLD ? (argb | 0xFF000000) : 0);
+            }
+        }
+        return result;
     }
 
     /** @return {minX, minY, maxX, maxY} of non-transparent pixels, or null */

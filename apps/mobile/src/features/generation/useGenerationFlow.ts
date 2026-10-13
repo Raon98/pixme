@@ -53,6 +53,9 @@ export interface FlowState {
   progress: number;
   generation: PixelGeneration | null;
   errorCode: string | null;
+  /** TEMP debug: raw error message, surfaced on the failed screen to diagnose
+   * a silent client-side failure. Remove once root-caused. */
+  errorMessage: string | null;
 }
 
 /**
@@ -77,11 +80,20 @@ export function useGenerationFlow() {
     progress: 0,
     generation: null,
     errorCode: null,
+    errorMessage: null,
   });
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startedAt = useRef<number>(0);
   const cancelled = useRef(false);
+  /**
+   * Hard lock around the one call that spends money. A second tap of 다시
+   * 시도 lands with `retryCount` already incremented, which produces a
+   * *different* idempotency key — so the server sees a genuinely new attempt
+   * and bills a second full generation. A disabled button is not enough on
+   * its own; the guard belongs next to the spend.
+   */
+  const inFlight = useRef(false);
 
   const stopPolling = useCallback(() => {
     if (pollTimer.current) {
@@ -125,6 +137,7 @@ export function useGenerationFlow() {
           progress: 1,
           generation,
           errorCode: null,
+          errorMessage: null,
         });
         return;
       }
@@ -139,6 +152,7 @@ export function useGenerationFlow() {
         progress: 1,
         generation,
         errorCode: generation.failureReason,
+        errorMessage: null,
       });
     },
     [queryClient, refreshUser, setGeneration],
@@ -154,6 +168,7 @@ export function useGenerationFlow() {
             ...previous,
             phase: 'timeout',
             errorCode: 'TIMEOUT',
+            errorMessage: null,
           }));
           return;
         }
@@ -189,9 +204,11 @@ export function useGenerationFlow() {
   /** Uploads the original (once) and starts a generation. */
   const start = useCallback(
     async (options?: { isRetry?: boolean }) => {
+      if (inFlight.current) return;
       const currentDraft = useGenerationStore.getState().draft;
       if (!currentDraft) return;
 
+      inFlight.current = true;
       cancelled.current = false;
       startedAt.current = Date.now();
       setState({
@@ -199,6 +216,7 @@ export function useGenerationFlow() {
         progress: 0.04,
         generation: null,
         errorCode: null,
+        errorMessage: null,
       });
 
       try {
@@ -305,8 +323,11 @@ export function useGenerationFlow() {
           progress: 1,
           generation: null,
           errorCode: apiError.code,
+          errorMessage: apiError.message,
         });
         await refreshUser();
+      } finally {
+        inFlight.current = false;
       }
     },
     [
@@ -327,6 +348,7 @@ export function useGenerationFlow() {
       progress: 0,
       generation: null,
       errorCode: null,
+      errorMessage: null,
     });
   }, [stopPolling]);
 

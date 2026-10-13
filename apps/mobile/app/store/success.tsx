@@ -6,7 +6,9 @@ import Animated, { ZoomIn } from 'react-native-reanimated';
 import { copy } from '@/constants/copy';
 import { haptics } from '@/lib/haptics';
 import { radius, spacing, useTheme } from '@/theme';
-import { Button, Screen, Text } from '@/ui';
+import { Button, Screen, Text, useToast } from '@/ui';
+import { slotForUnlockCode } from '@/features/decorations/catalog';
+import { useApplyDecoration } from '@/features/decorations/useDecorations';
 import { useStoreCatalog } from '@/features/store/useStoreCatalog';
 import { useAuthStore } from '@/features/auth/authStore';
 
@@ -19,8 +21,10 @@ export default function PurchaseSuccessRoute() {
   const router = useRouter();
   const { colors } = useTheme();
 
+  const toast = useToast();
   const { catalog } = useStoreCatalog();
   const entitlements = useAuthStore((state) => state.user?.entitlements ?? null);
+  const applyDecoration = useApplyDecoration();
 
   const product = useMemo(() => {
     if (!catalog || !productCode) return null;
@@ -39,6 +43,10 @@ export default function PurchaseSuccessRoute() {
   }, []);
 
   const isSubscription = product?.kind === 'SUBSCRIPTION';
+  const decorationSlot =
+    product?.kind === 'DECORATION' && product.unlockCode
+      ? slotForUnlockCode(product.unlockCode)
+      : null;
 
   return (
     <Screen
@@ -46,8 +54,27 @@ export default function PurchaseSuccessRoute() {
       footer={
         <View>
           <Button
-            label={isSubscription ? copy.common.confirm : copy.today.emptyCta}
+            label={
+              decorationSlot
+                ? copy.store.applyNow
+                : isSubscription
+                  ? copy.common.confirm
+                  : copy.today.emptyCta
+            }
+            loading={applyDecoration.isPending}
             onPress={() => {
+              if (decorationSlot && product?.unlockCode) {
+                applyDecoration.mutate(
+                  { slot: decorationSlot, unlockCode: product.unlockCode },
+                  {
+                    onSuccess: () => {
+                      toast.show({ message: copy.store.applied, tone: 'success' });
+                      router.replace('/(tabs)/my');
+                    },
+                  },
+                );
+                return;
+              }
               if (isSubscription) router.replace('/(tabs)/my');
               else router.replace('/create');
             }}
@@ -84,16 +111,16 @@ export default function PurchaseSuccessRoute() {
         >
           {product
             ? isSubscription
-              ? `${product.name} 구독이 시작됐어요.`
+              ? copy.store.subscriptionStarted(product.name)
               : product.creditAmount
-                ? `생성권 ${product.creditAmount}개가 추가됐어요.`
-                : `${product.name}을(를) 사용할 수 있어요.`
-            : '구매가 완료됐어요.'}
+                ? copy.store.creditsAdded(product.creditAmount)
+                : copy.store.itemReady(product.name)
+            : copy.store.purchaseDone}
         </Text>
 
         {entitlements ? (
           <Text variant="caption" tone="tertiary" align="center" style={styles.balance}>
-            지금 보유한 생성권 {entitlements.creditBalance}개
+            {copy.store.balanceNow(entitlements.creditBalance)}
           </Text>
         ) : null}
       </View>

@@ -8,6 +8,17 @@ module.exports = [
   {
     rules: {
       'no-console': ['warn', { allow: ['warn', 'error'] }],
+    },
+  },
+  {
+    // The rule has to live in a block that also registers its plugin, and the
+    // plugin is only loadable for TS files. Declaring it loose made every
+    // `eslint` run abort with "could not find plugin", so nothing was linted.
+    files: ['**/*.ts', '**/*.tsx'],
+    plugins: {
+      '@typescript-eslint': require('@typescript-eslint/eslint-plugin'),
+    },
+    rules: {
       '@typescript-eslint/no-explicit-any': 'warn',
     },
   },

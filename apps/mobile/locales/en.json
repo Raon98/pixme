@@ -1,0 +1,8 @@
+{
+  "CFBundleDisplayName": "PIXME",
+  "NSCameraUsageDescription": "Used to take a photo so PIXME can make today's pixel character.",
+  "NSPhotoLibraryUsageDescription": "Used to pick a photo so PIXME can make today's pixel character.",
+  "NSPhotoLibraryAddUsageDescription": "Used to save your finished PIXME character to your photos.",
+  "NSMicrophoneUsageDescription": "Not used.",
+  "NSUserTrackingUsageDescription": "This app does not track you."
+}

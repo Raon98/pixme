@@ -186,6 +186,18 @@ public class GenerationPipeline {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void complete(UUID generationId, String objectKey, GeneratedCharacter character) {
         generationRepository.findById(generationId).ifPresent(generation -> {
+            // A worker that overran `STUCK_AFTER` has already been failed and
+            // refunded by the reaper. Completing it now would hand back the
+            // character on top of the refund, leaving the next generation
+            // effectively unpaid — the spend is gone and cannot be re-taken
+            // here, so the late result is dropped instead.
+            if (generation.getStatus().isTerminal()) {
+                log.info(
+                        "dropping late result for already-terminal generation={} status={}",
+                        generationId,
+                        generation.getStatus());
+                return;
+            }
             generation.markCompleted(
                     objectKey, character.model(), serializeAnalysis(character.analysis()));
             generationRepository.save(generation);

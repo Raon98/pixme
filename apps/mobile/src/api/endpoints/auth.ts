@@ -19,6 +19,10 @@ export const authApi = {
   kakao: (body: KakaoAuthRequest) =>
     post<AuthResponse>('/auth/kakao', body, options),
 
+  /** Native Kakao SDK path — the app already holds a Kakao access token. */
+  kakaoNative: (accessToken: string) =>
+    post<AuthResponse>('/auth/kakao/native', { accessToken }, options),
+
   refresh: (refreshToken: string) =>
     post<AuthTokens>('/auth/refresh', { refreshToken }, options),
 

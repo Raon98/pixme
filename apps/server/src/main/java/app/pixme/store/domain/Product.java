@@ -55,6 +55,11 @@ public class Product {
     @Column(name = "unlock_code", length = 48)
     private String unlockCode;
 
+    /** Which slot a DECORATION occupies; null for every other kind. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "decoration_slot", length = 24)
+    private DecorationSlot decorationSlot;
+
     @Column(name = "badge", length = 24)
     private String badge;
 

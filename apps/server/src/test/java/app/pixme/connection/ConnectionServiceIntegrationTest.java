@@ -46,7 +46,7 @@ class ConnectionServiceIntegrationTest {
         User target = fixtures.activeUser("targt");
 
         ConnectionService.RequestResult result =
-                connectionService.request(sender.getId(), target.getId(), null);
+                connectionService.request(sender.getId(), target.getId(), null, null);
 
         assertThat(result.status()).isEqualTo(ConnectionService.RelationStatus.REQUESTED_BY_ME);
         assertThat(result.connection()).isNull();
@@ -63,9 +63,9 @@ class ConnectionServiceIntegrationTest {
         User first = fixtures.activeUser("mutu1");
         User second = fixtures.activeUser("mutu2");
 
-        connectionService.request(first.getId(), second.getId(), null);
+        connectionService.request(first.getId(), second.getId(), null, null);
         ConnectionService.RequestResult result =
-                connectionService.request(second.getId(), first.getId(), null);
+                connectionService.request(second.getId(), first.getId(), null, null);
 
         assertThat(result.status()).isEqualTo(ConnectionService.RelationStatus.CONNECTED);
         assertThat(result.connection()).isNotNull();
@@ -85,14 +85,54 @@ class ConnectionServiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("한쪽만 메시지를 붙이면 매칭 시 그 한 줄만 대화 첫 메시지로 들어간다")
+    void oneSidedWaveMessageBecomesOpeningMessage() {
+        User first = fixtures.activeUser("note1");
+        User second = fixtures.activeUser("note2");
+
+        connectionService.request(first.getId(), second.getId(), null, "안녕하세요! 옷 스타일이 멋져요");
+        ConnectionService.RequestResult result =
+                connectionService.request(second.getId(), first.getId(), null, null);
+
+        // Newest first: the note, then the system opener underneath it —
+        // never shown to the recipient before this exact moment.
+        var messages = chatService.messages(
+                first.getId(), result.conversationId(), null, null, 10);
+        assertThat(messages).hasSize(2);
+        assertThat(messages.get(0).getSenderId()).isEqualTo(first.getId());
+        assertThat(messages.get(0).getContent()).isEqualTo("안녕하세요! 옷 스타일이 멋져요");
+        assertThat(messages.get(1).getContent()).contains("마음이 통했어요");
+    }
+
+    @Test
+    @DisplayName("양쪽 다 메시지를 붙이면 보낸 순서대로 둘 다 들어간다")
+    void bothSidesWaveMessagesBothAppearInOrder() {
+        User first = fixtures.activeUser("note3");
+        User second = fixtures.activeUser("note4");
+
+        connectionService.request(first.getId(), second.getId(), null, "첫 인사");
+        ConnectionService.RequestResult result =
+                connectionService.request(second.getId(), first.getId(), null, "저도 반가워요");
+
+        // Newest first: second's reply, then first's note, then the opener.
+        var messages = chatService.messages(
+                first.getId(), result.conversationId(), null, null, 10);
+        assertThat(messages).hasSize(3);
+        assertThat(messages.get(0).getSenderId()).isEqualTo(second.getId());
+        assertThat(messages.get(0).getContent()).isEqualTo("저도 반가워요");
+        assertThat(messages.get(1).getSenderId()).isEqualTo(first.getId());
+        assertThat(messages.get(1).getContent()).isEqualTo("첫 인사");
+    }
+
+    @Test
     @DisplayName("👋 를 두 번 보내도 상태는 그대로다")
     void repeatedWaveIsIdempotent() {
         User sender = fixtures.activeUser("twice");
         User target = fixtures.activeUser("quiet");
 
-        connectionService.request(sender.getId(), target.getId(), null);
+        connectionService.request(sender.getId(), target.getId(), null, null);
         ConnectionService.RequestResult second =
-                connectionService.request(sender.getId(), target.getId(), null);
+                connectionService.request(sender.getId(), target.getId(), null, null);
 
         assertThat(second.status()).isEqualTo(ConnectionService.RelationStatus.REQUESTED_BY_ME);
         assertThat(second.connection()).isNull();
@@ -104,7 +144,7 @@ class ConnectionServiceIntegrationTest {
         User user = fixtures.activeUser("self");
 
         assertThatThrownBy(() ->
-                        connectionService.request(user.getId(), user.getId(), null))
+                        connectionService.request(user.getId(), user.getId(), null, null))
                 .isInstanceOf(ApiException.class);
     }
 
@@ -119,13 +159,13 @@ class ConnectionServiceIntegrationTest {
         // Both directions, so the blocked party cannot infer the block by
         // succeeding where the blocker failed.
         assertThatThrownBy(() ->
-                        connectionService.request(blocker.getId(), blocked.getId(), null))
+                        connectionService.request(blocker.getId(), blocked.getId(), null, null))
                 .isInstanceOf(ApiException.class)
                 .extracting(error -> ((ApiException) error).code())
                 .isEqualTo(ErrorCode.BLOCKED_BY_PEER);
 
         assertThatThrownBy(() ->
-                        connectionService.request(blocked.getId(), blocker.getId(), null))
+                        connectionService.request(blocked.getId(), blocker.getId(), null, null))
                 .isInstanceOf(ApiException.class)
                 .extracting(error -> ((ApiException) error).code())
                 .isEqualTo(ErrorCode.BLOCKED_BY_PEER);
@@ -137,8 +177,8 @@ class ConnectionServiceIntegrationTest {
         User first = fixtures.activeUser("sevr1");
         User second = fixtures.activeUser("sevr2");
 
-        connectionService.request(first.getId(), second.getId(), null);
-        var result = connectionService.request(second.getId(), first.getId(), null);
+        connectionService.request(first.getId(), second.getId(), null, null);
+        var result = connectionService.request(second.getId(), first.getId(), null, null);
         var conversationId = result.conversationId();
 
         safetyService.block(first.getId(), second.getId());
@@ -157,12 +197,38 @@ class ConnectionServiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("차단을 풀고 다시 👋 를 주고받으면 재연결된다")
+    void unblockingThenRewavingReconnects() {
+        User first = fixtures.activeUser("unbl1");
+        User second = fixtures.activeUser("unbl2");
+
+        connectionService.request(first.getId(), second.getId(), null, null);
+        connectionService.request(second.getId(), first.getId(), null, null);
+
+        safetyService.block(first.getId(), second.getId());
+        safetyService.unblock(first.getId(), second.getId());
+
+        // The pair's (userA, userB) row is permanently unique — reconnecting
+        // has to revive it, not insert a second one, which this would 500 on
+        // if that regressed.
+        connectionService.request(first.getId(), second.getId(), null, null);
+        ConnectionService.RequestResult result =
+                connectionService.request(second.getId(), first.getId(), null, null);
+
+        assertThat(result.status()).isEqualTo(ConnectionService.RelationStatus.CONNECTED);
+        assertThat(result.connection()).isNotNull();
+        assertThat(result.connection().isActive()).isTrue();
+        assertThat(connectionService.activeConnections(first.getId())).hasSize(1);
+        assertThat(connectionService.activeConnections(second.getId())).hasSize(1);
+    }
+
+    @Test
     @DisplayName("👋 를 취소하면 대기 상태가 사라진다")
     void cancellingClearsPendingState() {
         User sender = fixtures.activeUser("cancl");
         User target = fixtures.activeUser("recvr");
 
-        connectionService.request(sender.getId(), target.getId(), null);
+        connectionService.request(sender.getId(), target.getId(), null, null);
         connectionService.cancel(sender.getId(), target.getId());
 
         assertThat(connectionService.relationStatus(sender.getId(), target.getId()))
@@ -177,8 +243,8 @@ class ConnectionServiceIntegrationTest {
         User first = fixtures.activeUser("nomsg");
         User second = fixtures.activeUser("nomsg2");
 
-        connectionService.request(first.getId(), second.getId(), null);
-        var connected = connectionService.request(second.getId(), first.getId(), null);
+        connectionService.request(first.getId(), second.getId(), null, null);
+        var connected = connectionService.request(second.getId(), first.getId(), null, null);
 
         User outsider = fixtures.activeUser("outsd");
 
@@ -195,8 +261,8 @@ class ConnectionServiceIntegrationTest {
         User first = fixtures.activeUser("dup1");
         User second = fixtures.activeUser("dup2");
 
-        connectionService.request(first.getId(), second.getId(), null);
-        var connected = connectionService.request(second.getId(), first.getId(), null);
+        connectionService.request(first.getId(), second.getId(), null, null);
+        var connected = connectionService.request(second.getId(), first.getId(), null, null);
 
         var firstSend = chatService.send(
                 first.getId(), connected.conversationId(), "안녕!", "client-abc");
@@ -217,8 +283,8 @@ class ConnectionServiceIntegrationTest {
         User sender = fixtures.activeUser("read1");
         User reader = fixtures.activeUser("read2");
 
-        connectionService.request(sender.getId(), reader.getId(), null);
-        var connected = connectionService.request(reader.getId(), sender.getId(), null);
+        connectionService.request(sender.getId(), reader.getId(), null, null);
+        var connected = connectionService.request(reader.getId(), sender.getId(), null, null);
 
         var message = chatService.send(
                 sender.getId(), connected.conversationId(), "자니?", "client-xyz");
@@ -237,8 +303,8 @@ class ConnectionServiceIntegrationTest {
         User first = fixtures.activeUser("ack1");
         User second = fixtures.activeUser("ack2");
 
-        connectionService.request(first.getId(), second.getId(), null);
-        var result = connectionService.request(second.getId(), first.getId(), null);
+        connectionService.request(first.getId(), second.getId(), null, null);
+        var result = connectionService.request(second.getId(), first.getId(), null, null);
         var connection = result.connection();
 
         assertThat(connection.isAcknowledgedBy(first.getId())).isFalse();

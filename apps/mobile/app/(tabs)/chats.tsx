@@ -18,12 +18,14 @@ import {
   Screen,
   Text,
 } from '@/ui';
+import { NoCharacterGate } from '@/features/profile/NoCharacterGate';
+import { useMe } from '@/features/profile/useProfile';
 import { useConversations } from '@/features/chat/useConversations';
 import { useSocketStatus } from '@/features/chat/useChatSocket';
 import { useConnections } from '@/features/connections/useConnections';
 
 /**
- * 대화 — only people with a mutual 👋 appear here.
+ * Chats — only people with a mutual 👋 appear here.
  *
  * Incoming one-sided requests are deliberately NOT listed: showing "3 people
  * want to talk to you" would turn a light signal into a queue to triage, and
@@ -34,6 +36,7 @@ export default function ChatsRoute() {
   const { colors } = useTheme();
   const router = useRouter();
 
+  const me = useMe();
   const conversations = useConversations();
   const connections = useConnections();
   const socketStatus = useSocketStatus();
@@ -58,6 +61,18 @@ export default function ChatsRoute() {
       }
     />
   );
+
+  // Before any of the list's own states: without a character there is
+  // nothing this tab can do, and the loading skeleton would just delay
+  // saying so.
+  if (me.data && !me.data.representativeCharacterUrl) {
+    return (
+      <Screen edges={['top']}>
+        {header}
+        <NoCharacterGate />
+      </Screen>
+    );
+  }
 
   if (conversations.isPending) {
     return (
@@ -88,7 +103,7 @@ export default function ChatsRoute() {
           glyph="👋"
           title={copy.chat.emptyTitle}
           body={copy.chat.emptyBody}
-          actionLabel="오늘 구경하기"
+          actionLabel={copy.chat.browseToday}
           onAction={() => router.replace('/(tabs)')}
         />
       </Screen>
@@ -175,7 +190,7 @@ function ConversationRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${conversation.peer.nickname}와의 대화`}
+      accessibilityLabel={copy.a11y.conversationWith(conversation.peer.nickname)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
@@ -228,7 +243,7 @@ function FreshConnection({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${conversation.peer.nickname}와 대화 시작`}
+      accessibilityLabel={copy.a11y.startChatWith(conversation.peer.nickname)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.freshItem,

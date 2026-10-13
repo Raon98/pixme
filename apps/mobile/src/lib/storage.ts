@@ -22,6 +22,8 @@ export const StorageKey = {
   KeepOriginalPhoto: 'pixme.privacy.keepOriginalPhoto',
   LastGenerationDraft: 'pixme.generation.draft',
   AnalyticsAnonymousId: 'pixme.analytics.anonymousId',
+  /** iOS gives exactly one shot at the OS prompt, so only ever ask once. */
+  PushPromptSeen: 'pixme.push.promptSeen',
 } as const;
 
 export type StorageKeyValue = (typeof StorageKey)[keyof typeof StorageKey];

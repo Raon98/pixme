@@ -7,10 +7,11 @@ import * as SplashScreen from 'expo-splash-screen';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import { analytics } from '@/lib/analytics';
-import { createQueryClient } from '@/lib/queryClient';
+import { createQueryClient, setMutationErrorReporter } from '@/lib/queryClient';
 import { storage, StorageKey } from '@/lib/storage';
 import { ThemeProvider, useTheme } from '@/theme';
-import { ToastProvider } from '@/ui';
+import { ToastProvider, useToast } from '@/ui';
+import { AppGate } from '@/features/system/AppGate';
 import { useAuthStore } from '@/features/auth/authStore';
 import { useChatSocketBridge } from '@/features/chat/useChatSocket';
 import {
@@ -29,7 +30,9 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
             <ToastProvider>
-              <AppShell />
+              <AppGate>
+                <AppShell />
+              </AppGate>
             </ToastProvider>
           </ThemeProvider>
         </QueryClientProvider>
@@ -46,8 +49,14 @@ export default function RootLayout() {
  */
 function AppShell() {
   const theme = useTheme();
+  const toast = useToast();
   const bootstrap = useAuthStore((state) => state.bootstrap);
   const sessionState = useAuthStore((state) => state.sessionState);
+
+  // Gives every mutation without its own error handling a visible failure.
+  useEffect(() => {
+    setMutationErrorReporter((message) => toast.show({ message, tone: 'error' }));
+  }, [toast]);
 
   useChatSocketBridge();
   usePushRegistration();
@@ -78,10 +87,21 @@ function AppShell() {
         <Stack.Screen name="profile-setup" options={{ gestureEnabled: false }} />
         <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
 
-        {/* Create flow — presented as a modal stack so the tabs stay behind it. */}
+        {/*
+          Create flow — presented as a modal stack so the tabs stay behind it.
+          `transparentModal` only actually shows the previous screen behind it
+          when the route's own background is explicitly transparent — React
+          Navigation's native-stack otherwise paints the default (opaque)
+          screen background over whatever was there, which on web reads as
+          "the background disappears" rather than "a sheet opened over it".
+        */}
         <Stack.Screen
           name="create/index"
-          options={{ presentation: 'transparentModal', animation: 'fade' }}
+          options={{
+            presentation: 'transparentModal',
+            animation: 'fade',
+            contentStyle: { backgroundColor: 'transparent' },
+          }}
         />
         <Stack.Screen name="create/preview" options={{ presentation: 'modal' }} />
         <Stack.Screen
@@ -93,14 +113,22 @@ function AppShell() {
 
         <Stack.Screen
           name="connection-success"
-          options={{ presentation: 'transparentModal', animation: 'fade' }}
+          options={{
+            presentation: 'transparentModal',
+            animation: 'fade',
+            contentStyle: { backgroundColor: 'transparent' },
+          }}
         />
         <Stack.Screen name="report" options={{ presentation: 'modal' }} />
         <Stack.Screen name="store/index" options={{ presentation: 'modal' }} />
         <Stack.Screen name="store/plus" options={{ presentation: 'modal' }} />
         <Stack.Screen
           name="store/success"
-          options={{ presentation: 'transparentModal', animation: 'fade' }}
+          options={{
+            presentation: 'transparentModal',
+            animation: 'fade',
+            contentStyle: { backgroundColor: 'transparent' },
+          }}
         />
       </Stack>
     </View>
@@ -114,6 +142,7 @@ function AppShell() {
  *   not onboarded → /onboarding
  *   signed out    → /login
  *   profile       → /profile-setup   (nickname/birth/interests incomplete)
+ *   just set up   → /create          (first run, straight into making one)
  *   otherwise     → the tabs
  */
 function useAuthRedirect(sessionState: ReturnType<typeof useAuthStore.getState>['sessionState']) {
@@ -148,7 +177,15 @@ function useAuthRedirect(sessionState: ReturnType<typeof useAuthStore.getState>[
       }
 
       // signed-in
-      if (onAuthScreen || onProfileSetup) router.replace('/(tabs)');
+      if (onProfileSetup) {
+        // Reaching signed-in from profile-setup means first-run setup just
+        // finished, so go make the first PIXME instead of landing on an empty
+        // MY tab. The tabs go underneath first, since /create closes with back.
+        router.replace('/(tabs)');
+        router.push('/create');
+        return;
+      }
+      if (onAuthScreen) router.replace('/(tabs)');
       else if (!inTabs && first === undefined) router.replace('/(tabs)');
     })();
   }, [router, segments, sessionState]);

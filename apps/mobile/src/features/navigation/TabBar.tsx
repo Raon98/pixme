@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
 
+import { copy } from '@/constants/copy';
 import { haptics } from '@/lib/haptics';
 import { layout, opacity, radius, shadow, spacing, useTheme, zIndex } from '@/theme';
 import { Badge, Icon, Text, type IconName } from '@/ui';
@@ -11,14 +12,14 @@ import { useTodayStatus } from '../feed/useTodayFeed';
 import { useNotificationBadge } from '../notifications/useNotifications';
 
 const TAB_META: Record<string, { label: string; icon: IconName }> = {
-  index: { label: '오늘', icon: 'today' },
-  square: { label: '광장', icon: 'square' },
-  chats: { label: '대화', icon: 'chat' },
+  index: { label: copy.today.title, icon: 'today' },
+  square: { label: copy.square.tabTitle, icon: 'square' },
+  chats: { label: copy.chat.title, icon: 'chat' },
   my: { label: 'MY', icon: 'user' },
 };
 
 /**
- * Custom tab bar: 오늘 | 광장 | ＋ | 대화 | MY
+ * Custom tab bar: Today | Square | ＋ | Chats | MY
  *
  * The centre "＋" is not a tab — it is a raised action that opens the create
  * flow as a modal. Making it a route would mean the user could "be on" the
@@ -116,7 +117,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="PIXME 만들기"
+          accessibilityLabel={copy.today.emptyCta}
           onPress={() => {
             haptics.tap();
             router.push('/create');

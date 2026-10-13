@@ -7,7 +7,9 @@ import { getPushPermissionStatus } from '@/lib/push';
 import { spacing, useTheme } from '@/theme';
 import {
   Button,
+  ErrorState,
   Header,
+  ListSkeleton,
   ListRow,
   Screen,
   SectionHeader,
@@ -19,38 +21,33 @@ import { useMe, useUpdateMe } from '@/features/profile/useProfile';
 
 type PushKey = Extract<
   keyof UserSettings,
-  | 'pushHeart'
-  | 'pushConnectionRequest'
-  | 'pushConnected'
-  | 'pushMessage'
-  | 'pushDailyReminder'
+  'pushHeart' | 'pushConnected' | 'pushMessage' | 'pushDailyReminder'
 >;
 
+// There is deliberately no row here for "someone waved at you" — PIXME never
+// sends that notification, not even anonymously (see `ConnectionNotifier` on
+// the server). A toggle for a push that can never fire would just be a
+// confusing dead switch.
 const ROWS: { key: PushKey; title: string; subtitle: string }[] = [
   {
     key: 'pushHeart',
-    title: '♡ 하트',
-    subtitle: '누군가 내 PIXME에 하트를 보냈을 때',
-  },
-  {
-    key: 'pushConnectionRequest',
-    title: '👋 친해지고 싶어요',
-    subtitle: '누군가 나와 친해지고 싶다고 했을 때',
+    title: copy.settings.pushHeart,
+    subtitle: copy.settings.pushHeartHint,
   },
   {
     key: 'pushConnected',
-    title: '✨ 서로 연결됨',
-    subtitle: '서로 마음이 통해 연결됐을 때',
+    title: copy.settings.pushConnected,
+    subtitle: copy.settings.pushConnectedHint,
   },
   {
     key: 'pushMessage',
-    title: '💬 새로운 메시지',
-    subtitle: '연결된 사람이 메시지를 보냈을 때',
+    title: copy.settings.pushMessage,
+    subtitle: copy.settings.pushMessageHint,
   },
   {
     key: 'pushDailyReminder',
-    title: '오늘의 PIXME 알림',
-    subtitle: '하루에 한 번, 아직 오늘을 남기지 않았을 때만',
+    title: copy.settings.pushDaily,
+    subtitle: copy.settings.pushDailyHint,
   },
 ];
 
@@ -92,6 +89,28 @@ export default function NotificationSettingsRoute() {
     [settings, toast, updateMe],
   );
 
+  // A switch bound to server state must not render before that state
+  // arrives: while loading it would show a default that can be the opposite
+  // of the truth, and a tap would then write the wrong value. On error it
+  // would read as "everything is off" rather than "we couldn't load this".
+  if (me.isPending && !me.data) {
+    return (
+      <Screen edges={['top']}>
+        <Header title={copy.settings.notifications} />
+        <ListSkeleton />
+      </Screen>
+    );
+  }
+
+  if (me.isError && !me.data) {
+    return (
+      <Screen edges={['top']}>
+        <Header title={copy.settings.notifications} />
+        <ErrorState error={me.error} onRetry={() => void me.refetch()} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen edges={['top']} scroll>
       <Header title={copy.settings.notifications} />
@@ -104,8 +123,7 @@ export default function NotificationSettingsRoute() {
           ]}
         >
           <Text variant="caption">
-            기기 설정에서 PIXME 알림이 꺼져 있어요. 아래 설정은 알림을 켠 뒤에
-            적용돼요.
+            {copy.settings.pushDeniedBanner}
           </Text>
           <Button
             label={copy.create.openSettings}
@@ -118,7 +136,7 @@ export default function NotificationSettingsRoute() {
         </View>
       ) : null}
 
-      <SectionHeader title="알림 종류" />
+      <SectionHeader title={copy.settings.pushTypesSection} />
 
       {ROWS.map((row) => (
         <ListRow
@@ -138,8 +156,7 @@ export default function NotificationSettingsRoute() {
       ))}
 
       <Text variant="micro" tone="tertiary" style={styles.note}>
-        PIXME는 알림을 아껴서 보내요. 하트는 묶어서, 오늘의 알림은 하루에 한 번만
-        보내고, 이미 오늘의 PIXME를 남겼다면 보내지 않아요.
+        {copy.settings.pushNote}
       </Text>
     </Screen>
   );

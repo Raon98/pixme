@@ -15,7 +15,9 @@ public enum SpendKind {
     FREE_FIRST_RETRY,
     /** A non-expiring free credit granted at sign-up. */
     FREE_BONUS,
-    PAID_CREDIT;
+    PAID_CREDIT,
+    /** A master account — see {@link app.pixme.user.MasterAccountService}. Nothing is ever debited or refunded. */
+    MASTER;
 
     public boolean isFree() {
         return this != PAID_CREDIT;

@@ -48,8 +48,9 @@ legal requirement, a store rejection risk, or a correctness hole.
 - [ ] Sandbox tested end to end: purchase, grant, restore, **deferred/pending
       payment on Play**, and expiry
 - [ ] **blocking** Walk the free-chance funnel on a real device: first
-      generation → free retry → bonus credit → paywall. There is no daily free
-      generation, so a break here loses every new user at the same point.
+      generation → free retry → paywall. There is no daily free generation and
+      no bonus credit (removed 2026-10-07), so a break here loses every new
+      user at the same point.
 
 ## Legal and privacy
 

@@ -1,5 +1,6 @@
 import { type StyleProp, StyleSheet, View, type ViewStyle } from 'react-native';
 
+import { copy } from '@/constants/copy';
 import { radius, useTheme } from '@/theme';
 
 import { PixelCharacter } from './PixelCharacter';
@@ -54,7 +55,9 @@ export function Avatar({
         <PixelCharacter
           uri={uri}
           size={size * 0.92}
-          accessibilityLabel={nickname ? `${nickname}의 PIXME` : 'PIXME'}
+          accessibilityLabel={
+            nickname ? copy.a11y.userPixel(nickname) : copy.brand.name
+          }
         />
       ) : (
         <Text variant="label" tone="tertiary">

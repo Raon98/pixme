@@ -61,7 +61,44 @@ class PromptLibraryTest {
         assertThat(prompt).contains("Image B is the PIXME Master Character Reference");
         assertThat(prompt).contains("identity and outfit reference");
         assertThat(prompt).contains("strict visual standard");
-        assertThat(prompt).contains("Do not create a new character style");
+        // The reference owns the build, not the rendering. It used to own both
+        // ("do not create a new character style"), which left every paid style
+        // looking like the free one.
+        assertThat(prompt).contains("Image B does NOT govern colour");
+        assertThat(prompt).contains("the style section wins");
+    }
+
+    @Test
+    @DisplayName("유료 스타일은 팔레트·셰이딩·외곽선을 구체적으로 지시한다")
+    void paidStylesStateTheirOwnRendering() {
+        ImageAnalysis analysis = stripedOutfit(ImageAnalysis.Framing.FULL_BODY);
+
+        for (PixelStyle style : PixelStyle.values()) {
+            if (style == PixelStyle.PIXME_BASIC) continue;
+
+            String prompt = prompts.characterPrompt(analysis, style, spec, true);
+            // Stated twice: once in place, once last, because the instructions
+            // in between all argue for consistency with the reference.
+            assertThat(prompt)
+                    .as("style %s is restated last", style)
+                    .contains("make the difference unmistakable");
+            assertThat(prompt)
+                    .as("style %s is spelled out", style)
+                    .contains("obvious at a glance");
+        }
+    }
+
+    @Test
+    @DisplayName("소프트 픽셀은 외곽선 규칙을 덮어쓴다")
+    void softPixelOverridesTheOutline() {
+        String prompt = prompts.characterPrompt(
+                stripedOutfit(ImageAnalysis.Framing.FULL_BODY),
+                PixelStyle.SOFT_PIXEL,
+                spec,
+                true);
+
+        assertThat(prompt).contains("NO black or dark outline");
+        assertThat(prompt).contains("overrides any outline instruction above");
     }
 
     @Test
@@ -158,7 +195,8 @@ class PromptLibraryTest {
 
         for (PixelStyle style : PixelStyle.values()) {
             String prompt = prompts.characterPrompt(analysis, style, spec, true);
-            assertThat(prompt).as("style %s", style).contains("FULLY TRANSPARENT");
+            assertThat(prompt).as("style %s", style).contains("fully transparent (alpha = 0)");
+            assertThat(prompt).as("style %s", style).contains("no vignette, no glow");
             assertThat(prompt).as("style %s", style).contains("Slightly oversized head");
             assertThat(prompt).as("style %s", style).contains("one consistent grid");
             assertThat(prompt).as("style %s", style).contains("photorealism, 3D render");
@@ -217,5 +255,42 @@ class PromptLibraryTest {
         assertThat(prompt).contains("Do NOT state the person's age, ethnicity");
         assertThat(prompt).contains("Never invent a face");
         assertThat(prompt).contains("Never guess");
+    }
+
+    @Test
+    @DisplayName("스타일은 그리는 방식만 바꾸고 옷·헤어는 못 건드린다")
+    void styleMayNotRedressTheCharacter() {
+        ImageAnalysis analysis = stripedOutfit(ImageAnalysis.Framing.FULL_BODY);
+
+        for (PixelStyle style : PixelStyle.values()) {
+            String prompt = prompts.characterPrompt(analysis, style, spec, true);
+
+            assertThat(prompt)
+                    .as("%s states the scope limit", style)
+                    .contains("SCOPE OF THE STYLE SECTION")
+                    .contains("The style NEVER controls what the character is wearing")
+                    .contains("change the hairstyle, hair length, fringe, parting or hair colour")
+                    .contains("add era-appropriate or genre-appropriate clothing of any kind");
+
+            // The style is restated last so it wins on recency; the limit has to
+            // come after it, or the restatement reopens what this closed.
+            assertThat(prompt.lastIndexOf("The style above changes only how this is drawn"))
+                    .as("%s closes the scope after the final style restatement", style)
+                    .isGreaterThan(prompt.lastIndexOf("make the difference"));
+        }
+    }
+
+    @Test
+    @DisplayName("어떤 스타일도 없는 옷을 지어내라고 말하지 않는다")
+    void noStyleInventsGarments() {
+        ImageAnalysis analysis = stripedOutfit(ImageAnalysis.Framing.FULL_BODY);
+
+        for (PixelStyle style : PixelStyle.values()) {
+            String prompt = prompts.characterPrompt(analysis, style, spec, true);
+
+            assertThat(prompt)
+                    .as("%s does not license adding anything to the outfit", style)
+                    .doesNotContain("accents added");
+        }
     }
 }
