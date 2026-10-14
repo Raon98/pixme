@@ -82,7 +82,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   web: { favicon: './assets/favicon.png', bundler: 'metro', output: 'single' },
   plugins: [
     'expo-router',
-    '@sentry/react-native',
     'expo-secure-store',
     'expo-apple-authentication',
     'expo-web-browser',
@@ -137,7 +136,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     wsBaseUrl: process.env.PIXME_WS_BASE_URL ?? 'wss://pixme-api.mohae.xyz/ws',
     kakaoRestApiKey: process.env.PIXME_KAKAO_REST_API_KEY ?? '',
     kakaoNativeAppKey: process.env.PIXME_KAKAO_NATIVE_APP_KEY ?? '',
-    sentryDsn: process.env.PIXME_SENTRY_DSN ?? '',
     // Instagram requires an attributed app id to open a story draft. Absent
     // is a supported state: sharing falls back to the system share sheet.
     facebookAppId: process.env.PIXME_FACEBOOK_APP_ID ?? '',

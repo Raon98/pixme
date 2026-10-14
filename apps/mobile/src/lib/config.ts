@@ -13,7 +13,6 @@ interface RawExtra {
   wsBaseUrl?: string;
   kakaoRestApiKey?: string;
   kakaoNativeAppKey?: string;
-  sentryDsn?: string;
   supportUrl?: string;
   facebookAppId?: string;
   termsUrl?: string;
@@ -54,7 +53,6 @@ export const config = {
     nativeAppKey: extra.kakaoNativeAppKey ?? '',
   },
 
-  sentryDsn: extra.sentryDsn ?? '',
 
   share: {
     /** Empty when unset — the story hand-off degrades to the share sheet. */
