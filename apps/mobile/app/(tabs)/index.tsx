@@ -44,6 +44,17 @@ export default function TodayRoute() {
   const badge = useNotificationBadge();
   const me = useMe();
 
+  // Bound to the pull gesture only, not `feed.isRefetching` — that flag also
+  // flips on the background refetch `useSetCurrentPixel` triggers (and on any
+  // other screen's invalidation of qk.feed.today()), which showed the native
+  // pull spinner animating in on its own, with no pull behind it, right after
+  // switching the current character and landing here.
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = useCallback(() => {
+    setManualRefreshing(true);
+    void feed.refetch().finally(() => setManualRefreshing(false));
+  }, [feed]);
+
   /**
    * Appearing on Today costs nothing — leaving a status does it. Generating a
    * new character is the paid, optional path. So the free action is offered
@@ -277,8 +288,8 @@ export default function TodayRoute() {
             }}
             refreshControl={
               <RefreshControl
-                refreshing={feed.isRefetching && !feed.isFetchingNextPage}
-                onRefresh={() => void feed.refetch()}
+                refreshing={manualRefreshing}
+                onRefresh={onPullRefresh}
                 tintColor={colors.accent}
               />
             }

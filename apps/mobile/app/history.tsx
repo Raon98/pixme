@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -36,6 +36,17 @@ export default function HistoryRoute() {
 
   const history = useMyHistory();
   const sections = useMemo(() => groupByMonth(history.data), [history.data]);
+
+  // Bound to the pull gesture only, not `history.isRefetching` — that flag
+  // also flips on the background refetch `useUpsertDailyStatus` triggers
+  // (and on any other screen's invalidation of qk.dailyStatus.history()),
+  // which showed the native pull spinner animating in on its own, with no
+  // pull behind it, right after leaving a status elsewhere and landing here.
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = useCallback(() => {
+    setManualRefreshing(true);
+    void history.refetch().finally(() => setManualRefreshing(false));
+  }, [history]);
 
   const header = (
     <Header
@@ -108,8 +119,8 @@ export default function HistoryRoute() {
         stickySectionHeadersEnabled={false}
         refreshControl={
           <RefreshControl
-            refreshing={history.isRefetching && !history.isFetchingNextPage}
-            onRefresh={() => void history.refetch()}
+            refreshing={manualRefreshing}
+            onRefresh={onPullRefresh}
             tintColor={colors.accent}
           />
         }

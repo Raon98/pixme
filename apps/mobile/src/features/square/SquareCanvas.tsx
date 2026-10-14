@@ -35,8 +35,23 @@ export interface SquareCanvasProps {
   myUserId?: string | null;
 }
 
-/** Where the painted ground starts, as a fraction of canvas height. */
-const HORIZON = 0.4;
+/**
+ * Where the painted ground starts, as a fraction of canvas height.
+ *
+ * <p>Sky is backdrop, not space. Every row above the horizon is dead canvas,
+ * and it compounds with {@link FEET_TOP} below — at 0.4 sky plus a 0.48 floor,
+ * nearly half the square was guaranteed to be empty no matter how many people
+ * turned up, which read as a bug rather than a quiet day.
+ */
+const HORIZON = 0.22;
+
+/**
+ * The highest a character's feet may stand, as a fraction of canvas height.
+ * Below the horizon by about one character's height: a 72pt body is drawn
+ * upwards from its feet, so standing on the skyline itself put the whole
+ * person in the sky. Mirrors `pixme.square.feet-top-ratio` on the server.
+ */
+const FEET_TOP = 0.38;
 
 /** Prop codes PlazaGround doesn't already draw as part of the scene itself. */
 const SKY_AND_SEASONAL = new Set([
@@ -115,7 +130,7 @@ export function SquareCanvas({
       const margin = canvasWidth * 0.08;
       setMyPosition({
         x: Math.min(Math.max(x, margin), canvasWidth - margin),
-        y: Math.min(Math.max(y, canvasHeight * HORIZON), canvasHeight * 0.96),
+        y: Math.min(Math.max(y, canvasHeight * FEET_TOP), canvasHeight * 0.96),
       });
     },
     [canvasHeight, canvasSize, canvasWidth, myUserId],
@@ -220,7 +235,14 @@ function Occupant({
   const HALF_WIDTH = 46;
   const FOOT_ROOM = 24;
   const clampedX = Math.min(Math.max(occupant.x, HALF_WIDTH), canvasWidth - HALF_WIDTH);
-  const clampedY = Math.min(Math.max(occupant.y, FOOT_ROOM), canvasHeight - FOOT_ROOM);
+  // Feet belong on the ground. The floor here used to be FOOT_ROOM, which let
+  // any coordinate above the horizon render a character standing in mid-air —
+  // the allocator now keeps them below it, but placements already stored from
+  // before that fix would otherwise still float.
+  const clampedY = Math.min(
+    Math.max(occupant.y, canvasHeight * FEET_TOP),
+    canvasHeight - FOOT_ROOM,
+  );
 
   const left = (clampedX / canvasWidth) * 100;
   const top = (clampedY / canvasHeight) * 100;

@@ -80,6 +80,17 @@ export default function SquareRoute() {
     > | null
   >(null);
 
+  // Bound to the pull gesture only, not `square.isRefetching` — that flag
+  // also flips on the background refetch `useSetCurrentPixel` triggers (and
+  // on any other screen's invalidation of the same query), which showed the
+  // native pull spinner animating in on its own, with no pull behind it,
+  // right after switching the current character and landing here.
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onPullRefresh = useCallback(() => {
+    setManualRefreshing(true);
+    void square.refetch().finally(() => setManualRefreshing(false));
+  }, [square]);
+
   React.useEffect(() => {
     analytics.screen('square');
     analytics.track('SQUARE_OPENED');
@@ -231,8 +242,8 @@ export default function SquareRoute() {
           myUserId={me.data?.id ?? null}
           refreshControl={
             <RefreshControl
-              refreshing={square.isRefetching}
-              onRefresh={() => void square.refetch()}
+              refreshing={manualRefreshing}
+              onRefresh={onPullRefresh}
               tintColor={colors.accent}
             />
           }

@@ -123,35 +123,48 @@ export default function PreviewRoute() {
   const [belowFrameHeight, setBelowFrameHeight] = useState(170);
 
   /**
-   * Deterministic, unlike the above: two fixed-height buttons plus the gap and
-   * padding `Screen` puts around a footer. Nothing here wraps.
+   * Only an opening estimate, used for the single frame before the real
+   * measurement below lands. Deriving the frame from the window like this was
+   * the whole bug: this route is presented as a sheet, so the card is shorter
+   * than the window, and every term here (the top inset the sheet doesn't
+   * actually clear, the footer's padding) is an assumption about chrome this
+   * screen does not own. The frame came out taller than the space it had and,
+   * because `styles.body` centres it, overflowed *both* ends — painting over
+   * the header title above and the hint below.
    */
-  const footerHeight =
-    layout.buttonHeight * 2 +
-    spacing.xs +
-    spacing.md +
-    Math.max(insets.bottom, spacing.base) +
-    StyleSheet.hairlineWidth;
-
-  /**
-   * `Screen` zeroes its own bottom inset when a footer is present (the footer
-   * absorbs it), so only the top inset comes off the window here — subtracting
-   * `insets.bottom` as well, as this once did, double-counted it.
-   */
-  const bodyHeight =
+  const estimatedBodyHeight =
     Dimensions.get('window').height -
     insets.top -
     layout.headerHeight -
-    footerHeight;
-  const frameHeight = Math.min(
-    frameWidth * FRAME_RATIO,
-    Math.max(240, bodyHeight - belowFrameHeight),
-  );
+    (layout.buttonHeight * 2 +
+      spacing.xs +
+      spacing.md +
+      Math.max(insets.bottom, spacing.base)) -
+    belowFrameHeight;
 
-  const displayHeight = useMemo(() => {
-    if (!draft) return frameHeight;
-    return (frameWidth * draft.source.height) / draft.source.width;
-  }, [draft, frameHeight, frameWidth]);
+  /**
+   * What the frame area is actually given. `styles.body` is `flex: 1`, so its
+   * height is decided by the layout, never by this frame — measuring it is a
+   * one-way read with no feedback loop, and it is true on any presentation
+   * style, device and font scale.
+   */
+  const [bodyHeight, setBodyHeight] = useState(0);
+  const available = bodyHeight > 0 ? bodyHeight : estimatedBodyHeight;
+
+  /** The photo at frame width — what there actually is to show and pan. */
+  const displayHeight = draft
+    ? (frameWidth * draft.source.height) / draft.source.width
+    : available;
+
+  /**
+   * Never taller than the photo itself: a portrait shot less tall than 4:3
+   * left an empty band of frame background under it, which reads as a broken
+   * image rather than a deliberate letterbox.
+   */
+  const frameHeight = Math.max(
+    1,
+    Math.min(frameWidth * FRAME_RATIO, available, displayHeight),
+  );
 
   /** Negative range: how far up the image may be dragged. */
   const minTranslate = Math.min(0, frameHeight - displayHeight);
@@ -287,7 +300,10 @@ export default function PreviewRoute() {
     >
       <Header title={copy.create.previewTitle} onBack={() => router.back()} />
 
-      <View style={styles.body}>
+      <View
+        style={styles.body}
+        onLayout={(event) => setBodyHeight(event.nativeEvent.layout.height)}
+      >
         <GestureDetector gesture={pan}>
           <View
             style={[
@@ -425,7 +441,11 @@ export default function PreviewRoute() {
 }
 
 const styles = StyleSheet.create({
-  body: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  // `overflow: hidden` is the backstop, not the fix: the frame is measured to
+  // fit. But this area centres its child, so anything taller than it would
+  // spill over the header *and* the hint rather than simply running past one
+  // edge, which is a uniquely bad-looking failure. Clip instead.
+  body: { flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   belowFrame: { alignItems: 'center' },
   styleRow: {
     flexDirection: 'row',
