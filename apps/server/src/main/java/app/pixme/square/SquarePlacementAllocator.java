@@ -47,11 +47,15 @@ public class SquarePlacementAllocator {
         int marginX = (int) (config.canvasWidth() * MARGIN_RATIO);
         int marginY = (int) (config.canvasHeight() * MARGIN_RATIO);
         int usableWidth = config.canvasWidth() - marginX * 2;
-        int usableHeight = config.canvasHeight() - marginY * 2;
+        // A character is drawn upwards from its feet, so spreading over the
+        // full canvas height left the back rows standing in the sky — the
+        // margin alone never kept anyone below the skyline.
+        int feetTop = feetTop();
+        int usableHeight = config.canvasHeight() - marginY - feetTop;
 
         if (existing.isEmpty()) {
             int x = marginX + random.nextInt(Math.max(1, usableWidth));
-            int y = marginY + random.nextInt(Math.max(1, usableHeight));
+            int y = feetTop + random.nextInt(Math.max(1, usableHeight));
             return new Point(x, y, depthFor(y));
         }
 
@@ -61,7 +65,7 @@ public class SquarePlacementAllocator {
 
         for (int attempt = 0; attempt < CANDIDATES_PER_POINT; attempt++) {
             int x = marginX + random.nextInt(Math.max(1, usableWidth));
-            int y = marginY + random.nextInt(Math.max(1, usableHeight));
+            int y = feetTop + random.nextInt(Math.max(1, usableHeight));
 
             double nearest = Double.MAX_VALUE;
             for (Point point : existing) {
@@ -94,18 +98,29 @@ public class SquarePlacementAllocator {
                     marginX,
                     config.canvasWidth() - marginX);
             bestY = clamp(
-                    (int) (config.canvasHeight() / 2.0
+                    (int) ((feetTop + config.canvasHeight() - marginY) / 2.0
                             + Math.sin(angle) * (config.minSeparation() * (2 + ring))),
-                    marginY,
+                    feetTop,
                     config.canvasHeight() - marginY);
         }
 
         return new Point(bestX, bestY, depthFor(bestY));
     }
 
-    /** Characters higher up the canvas are further away. */
+    /** Highest row a character's feet may occupy. */
+    private int feetTop() {
+        return (int) (config.canvasHeight() * config.feetTopRatio());
+    }
+
+    /**
+     * Characters further back on the ground are further away. Normalised over
+     * the walkable band rather than the whole canvas, so the full 0–4 range is
+     * still used now that nobody is placed above {@link #feetTop()}.
+     */
     private short depthFor(int y) {
-        double ratio = 1.0 - ((double) y / config.canvasHeight());
+        int top = feetTop();
+        double band = Math.max(1, config.canvasHeight() - top);
+        double ratio = 1.0 - ((y - top) / band);
         return (short) Math.min(4, Math.max(0, Math.round(ratio * 4)));
     }
 

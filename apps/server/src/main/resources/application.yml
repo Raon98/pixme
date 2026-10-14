@@ -212,6 +212,10 @@ pixme:
     # Minimum distance between two characters, in canvas units.
     min-separation: 92
     curation-size: 8
+    # Must match SquareCanvas.FEET_TOP on the client. Below the 0.22 horizon
+    # by roughly one character's height, so the back row stands on paving
+    # rather than poking into the sky.
+    feet-top-ratio: 0.38
 
   push:
     expo-api-url: https://exp.host/--/api/v2/push/send

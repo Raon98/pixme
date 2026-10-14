@@ -135,12 +135,20 @@ public record PixmeProperties(
             int maxExposuresPerAuthorPerDay,
             double newUserQuota) {}
 
+    /**
+     * @param feetTopRatio the highest a character's feet may be placed, as a
+     *     fraction of canvas height. Not the horizon itself: a character is
+     *     anchored at the feet and drawn upwards, so standing exactly on the
+     *     skyline puts their whole body in the sky. Must match the client's
+     *     {@code FEET_TOP}.
+     */
     public record Square(
             int pageSize,
             int canvasWidth,
             int canvasHeight,
             int minSeparation,
-            int curationSize) {}
+            int curationSize,
+            double feetTopRatio) {}
 
     public record Push(String expoApiUrl, String expoAccessToken, boolean enabled) {}
 
