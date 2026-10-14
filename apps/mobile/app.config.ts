@@ -82,6 +82,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   web: { favicon: './assets/favicon.png', bundler: 'metro', output: 'single' },
   plugins: [
     'expo-router',
+    '@sentry/react-native',
     'expo-secure-store',
     'expo-apple-authentication',
     'expo-web-browser',
@@ -143,8 +144,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     termsUrl: process.env.PIXME_TERMS_URL ?? 'https://pixme.mohae.xyz/terms',
     privacyUrl:
       process.env.PIXME_PRIVACY_URL ?? 'https://pixme.mohae.xyz/privacy',
-    supportEmail:
-      process.env.PIXME_SUPPORT_EMAIL ?? 'sungcheol1998@gmail.com',
+    // No default on purpose. This address is published to users, and the
+    // previous fallback was a personal Gmail that would have shipped
+    // silently — unset means "use the support page" below, which is the
+    // same URL already registered with App Store Connect.
+    supportEmail: process.env.PIXME_SUPPORT_EMAIL ?? '',
+    supportUrl:
+      process.env.PIXME_SUPPORT_URL ?? 'https://pixme.mohae.xyz/support',
     // Not a secret — a project id is just a public identifier (visible in
     // the project's own dashboard URL). Hardcoded as the default because
     // `eas` subcommands (credentials, update, submit) evaluate this config

@@ -14,6 +14,7 @@ interface RawExtra {
   kakaoRestApiKey?: string;
   kakaoNativeAppKey?: string;
   sentryDsn?: string;
+  supportUrl?: string;
   facebookAppId?: string;
   termsUrl?: string;
   privacyUrl?: string;
@@ -63,7 +64,14 @@ export const config = {
   links: {
     terms: extra.termsUrl ?? 'https://pixme.app/terms',
     privacy: extra.privacyUrl ?? 'https://pixme.app/privacy',
-    support: `mailto:${extra.supportEmail ?? 'help@pixme.app'}`,
+    /**
+     * A mailto only when an address is actually configured; otherwise the
+     * published support page. Guideline 1.2 wants reachable contact info,
+     * and a mailto to an unset address is worse than a page that exists.
+     */
+    support: extra.supportEmail
+      ? `mailto:${extra.supportEmail}`
+      : (extra.supportUrl ?? 'https://pixme.mohae.xyz/support'),
   },
 
   /** Network behaviour. */

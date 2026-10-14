@@ -4,9 +4,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Sentry from '@sentry/react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 import { analytics } from '@/lib/analytics';
+import { config } from '@/lib/config';
 import { createQueryClient, setMutationErrorReporter } from '@/lib/queryClient';
 import { storage, StorageKey } from '@/lib/storage';
 import { ThemeProvider, useTheme } from '@/theme';
@@ -21,7 +23,29 @@ import {
 
 void SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
+/**
+ * Crash reporting.
+ *
+ * <p>Guarded on the DSN rather than on a build flag: without one configured
+ * this is inert, so a development build never ships noise to the project and
+ * a misconfigured production build fails loudly at review time instead of
+ * silently reporting nothing.
+ *
+ * <p>`sendDefaultPii` stays off. A crash report from this app would otherwise
+ * be able to carry the user's email and IP, and the privacy declaration does
+ * not cover shipping those to a third party for diagnostics.
+ */
+if (config.sentryDsn) {
+  Sentry.init({
+    dsn: config.sentryDsn,
+    sendDefaultPii: false,
+    // Traces are a cost multiplier and nothing here is latency-sensitive
+    // enough to justify them at launch; crashes are the point.
+    tracesSampleRate: 0,
+  });
+}
+
+function RootLayout() {
   const queryClient = useMemo(() => createQueryClient(), []);
 
   return (
@@ -40,6 +64,12 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+/**
+ * Wrapped so a render error anywhere in the tree is captured rather than
+ * surfacing only as a blank screen the user reports by hand.
+ */
+export default Sentry.wrap(RootLayout);
 
 /**
  * Owns session bootstrap, the auth routing guard and the app-wide side

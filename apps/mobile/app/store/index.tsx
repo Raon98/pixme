@@ -80,6 +80,17 @@ export default function StoreRoute() {
     }
   }, [restore, toast]);
 
+  const restoreControl = (
+    <Text
+      variant="label"
+      tone="accent"
+      onPress={() => void onRestore()}
+      style={styles.restore}
+    >
+      {copy.store.restore}
+    </Text>
+  );
+
   if (isPending) {
     return (
       <Screen>
@@ -92,7 +103,13 @@ export default function StoreRoute() {
   if (isError || !catalog) {
     return (
       <Screen>
-        <Header title={copy.store.title} />
+        {/*
+          Restore stays in the header even here. A user who already paid and
+          is reinstalling hits this screen exactly when the catalog will not
+          load, and the old early return left them with nothing but a retry —
+          restore does not need the catalog to work.
+        */}
+        <Header title={copy.store.title} right={restoreControl} />
         <ErrorState error={error} onRetry={() => void refetch()} />
       </Screen>
     );
@@ -100,19 +117,7 @@ export default function StoreRoute() {
 
   return (
     <Screen>
-      <Header
-        title={copy.store.title}
-        right={
-          <Text
-            variant="label"
-            tone="accent"
-            onPress={() => void onRestore()}
-            style={styles.restore}
-          >
-            {copy.store.restore}
-          </Text>
-        }
-      />
+      <Header title={copy.store.title} right={restoreControl} />
 
       <ScrollView
         showsVerticalScrollIndicator={false}

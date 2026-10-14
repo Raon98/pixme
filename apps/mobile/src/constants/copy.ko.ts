@@ -345,6 +345,8 @@ export const ko = {
     tagline: '매일의 나를 더 자유롭게.',
     cta: 'PIXME+ 시작하기',
     manage: '구독 관리',
+    /** Apple requires the billing period next to the price, not just the price. */
+    priceLine: (price: string) => `${price} / 1개월 · 자동 갱신`,
     legal:
       '구독은 자동 갱신되며, 기기 설정에서 언제든 해지할 수 있어요. 해지하거나 구독이 끝나면 프리미엄 배경·테마는 자동으로 기본값으로 돌아가요.',
     activeUntil: (date: string) => `${date}까지 이용 중`,

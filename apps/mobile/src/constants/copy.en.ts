@@ -355,6 +355,8 @@ export const en: CopyBundle = {
     tagline: 'More room to be you, every day.',
     cta: 'Start PIXME+',
     manage: 'Manage subscription',
+    /** Apple requires the billing period next to the price, not just the price. */
+    priceLine: (price: string) => `${price} / 1 month · auto-renews`,
     legal:
       'Your subscription renews automatically, and you can cancel any time in your device settings. If you cancel or your subscription ends, premium backgrounds and themes go back to the defaults.',
     activeUntil: (date: string) => `Active until ${date}`,

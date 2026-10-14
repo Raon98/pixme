@@ -6,11 +6,13 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
 import app.pixme.common.ApiException;
 import app.pixme.common.ServiceClock;
+import app.pixme.common.TextSanitizer;
 import app.pixme.dailystatus.domain.DailyStatus;
 import app.pixme.dailystatus.domain.DailyStatusTag;
 import app.pixme.dailystatus.repository.DailyStatusRepository;
@@ -44,12 +46,16 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class DailyStatusService {
 
+    /** The client offers four; the server is what actually enforces it. */
+    private static final int MAX_TAGS = 4;
+
     private final DailyStatusRepository statusRepository;
     private final DailyStatusTagRepository tagRepository;
     private final UserCurrentPixelRepository currentPixelRepository;
     private final UserStatsRepository statsRepository;
     private final SquareService squareService;
     private final ServiceClock clock;
+    private final TextSanitizer sanitizer;
 
     public DailyStatusService(
             DailyStatusRepository statusRepository,
@@ -57,13 +63,15 @@ public class DailyStatusService {
             UserCurrentPixelRepository currentPixelRepository,
             UserStatsRepository statsRepository,
             SquareService squareService,
-            ServiceClock clock) {
+            ServiceClock clock,
+            TextSanitizer sanitizer) {
         this.statusRepository = statusRepository;
         this.tagRepository = tagRepository;
         this.currentPixelRepository = currentPixelRepository;
         this.statsRepository = statsRepository;
         this.squareService = squareService;
         this.clock = clock;
+        this.sanitizer = sanitizer;
     }
 
     @Transactional
@@ -94,7 +102,22 @@ public class DailyStatusService {
             UUID userId, String mood, String message, List<String> tags, UUID pixelCharacterId) {
 
         LocalDate today = clock.today();
-        List<String> safeTags = tags == null ? List.of() : tags;
+
+        // The caption and tags are published to the feed and the square, so
+        // they go through the same sanitiser as nicknames and bios. This was
+        // the one user-authored text path that wrote straight through:
+        // `sanitizeTag` existed but nothing called it, and the caption had
+        // only a length constraint.
+        String safeMessage =
+                message == null ? null : sanitizer.sanitizeFreeText(message, 60, "오늘의 한마디");
+        List<String> safeTags = tags == null
+                ? List.of()
+                : tags.stream()
+                        .map(sanitizer::sanitizeTag)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .limit(MAX_TAGS)
+                        .toList();
 
         DailyStatus status = statusRepository.findByUserIdAndStatusDate(userId, today).orElse(null);
         if (status == null) {
@@ -111,7 +134,7 @@ public class DailyStatusService {
             status.syncCharacter(pixelCharacterId);
         }
 
-        status.editStatus(mood, message);
+        status.editStatus(mood, safeMessage);
         DailyStatus saved = statusRepository.save(status);
 
         tagRepository.deleteByDailyStatusId(saved.getId());

@@ -97,23 +97,33 @@ export default function PlusRoute() {
     <Screen
       footer={
         plusActive ? (
-          <Button
-            label={copy.plus.manage}
-            variant="outline"
-            onPress={openManage}
-          />
+          <View>
+            <Button
+              label={copy.plus.manage}
+              variant="outline"
+              onPress={openManage}
+            />
+            {/* Shown to subscribers too: the renewal terms are exactly what
+                someone already paying needs to be able to find. */}
+            <Text variant="micro" tone="tertiary" align="center" style={styles.legal}>
+              {copy.plus.legal}
+            </Text>
+          </View>
         ) : (
           <View>
             <Button
-              label={
-                product
-                  ? `${copy.plus.cta} · ${product.displayPrice}`
-                  : copy.plus.cta
-              }
+              label={copy.plus.cta}
               disabled={!product}
               loading={pendingProductCode === product?.code}
               onPress={() => void onSubscribe()}
             />
+            {/* Price *and* billing period adjacent to the CTA — Apple rejects
+                a subscription that advertises a price without its length. */}
+            {product ? (
+              <Text variant="caption" align="center" style={styles.priceLine}>
+                {copy.plus.priceLine(product.displayPrice)}
+              </Text>
+            ) : null}
             <Text variant="micro" tone="tertiary" align="center" style={styles.legal}>
               {copy.plus.legal}
             </Text>
@@ -212,6 +222,7 @@ const styles = StyleSheet.create({
   benefitText: { flex: 1 },
   benefitDesc: { marginTop: spacing.xxs },
   note: { marginTop: spacing.lg },
+  priceLine: { marginTop: spacing.sm },
   legal: { marginTop: spacing.sm },
   // Apple requires an auto-renewable subscription screen to link both the
   // terms and the privacy policy, not just one.
