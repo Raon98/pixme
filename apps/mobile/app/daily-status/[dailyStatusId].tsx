@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -11,8 +12,10 @@ import {
   ErrorState,
   Header,
   Icon,
+  IconButton,
   PixelCharacter,
   Screen,
+  Sheet,
   Skeleton,
   Text,
 } from '@/ui';
@@ -35,6 +38,7 @@ export default function DailyStatusDetailRoute() {
   const { colors } = useTheme();
 
   const myId = useAuthStore((state) => state.user?.id ?? null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const status = useMyDailyStatusDetail(dailyStatusId);
 
@@ -74,6 +78,13 @@ export default function DailyStatusDetailRoute() {
       <Header
         title={formatPostDate(data.statusDate)}
         subtitle={isOwner ? undefined : `@${data.author.nickname}`}
+        right={
+          isOwner ? undefined : (
+            <IconButton label={copy.safety.report} onPress={() => setMenuOpen(true)}>
+              <Icon name="more" size={20} color={colors.text} />
+            </IconButton>
+          )
+        }
       />
 
       <View
@@ -142,6 +153,34 @@ export default function DailyStatusDetailRoute() {
       )}
 
       {sheet}
+
+      {/*
+        Reporting the *post*, not its author. Guideline 1.2 asks for a way to
+        flag objectionable content, and a user-level report cannot say which
+        day's caption or character was the problem.
+      */}
+      <Sheet
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        title={formatPostDate(data.statusDate)}
+      >
+        <Button
+          label={copy.safety.reportPost}
+          variant="secondary"
+          icon={<Icon name="flag" size={18} color={colors.text} />}
+          onPress={() => {
+            setMenuOpen(false);
+            router.push({
+              pathname: '/report',
+              params: {
+                targetType: 'DAILY_STATUS',
+                targetId: data.id,
+                nickname: data.author.nickname,
+              },
+            });
+          }}
+        />
+      </Sheet>
     </Screen>
   );
 }

@@ -373,6 +373,8 @@ export const ko = {
     reportTitle: '어떤 점이 문제였나요?',
     reportDetailPlaceholder: '자세한 내용을 알려주시면 확인에 도움이 돼요. (선택)',
     reportAlsoBlock: '이 사용자도 함께 차단하기',
+    reportPost: '이 게시물 신고',
+    reportMessage: '이 메시지 신고',
     reportSubmit: '신고 보내기',
     reportDone: '신고를 접수했어요. 확인 후 조치할게요.',
     reportReasons: {

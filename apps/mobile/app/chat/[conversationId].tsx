@@ -74,6 +74,7 @@ export default function ChatRoute() {
 
   const [draft, setDraft] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reportingMessage, setReportingMessage] = useState<Message | null>(null);
   const [blockPrompt, setBlockPrompt] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
@@ -253,7 +254,11 @@ export default function ChatRoute() {
               </View>
             }
             renderItem={({ item }) => (
-              <MessageBubble message={item} mine={item.senderId === myId} />
+              <MessageBubble
+                message={item}
+                mine={item.senderId === myId}
+                onReport={setReportingMessage}
+              />
             )}
           />
 
@@ -375,11 +380,47 @@ export default function ChatRoute() {
         }}
         onCancel={() => setBlockPrompt(false)}
       />
+
+      <Sheet
+        visible={reportingMessage !== null}
+        onClose={() => setReportingMessage(null)}
+        title={copy.safety.reportMessage}
+      >
+        <Text variant="body" tone="secondary" style={styles.reportPreview}>
+          “{reportingMessage?.content ?? ''}”
+        </Text>
+        <Button
+          label={copy.safety.report}
+          variant="secondary"
+          icon={<Icon name="flag" size={18} color={colors.text} />}
+          onPress={() => {
+            const target = reportingMessage;
+            setReportingMessage(null);
+            if (!target) return;
+            router.push({
+              pathname: '/report',
+              params: {
+                targetType: 'MESSAGE',
+                targetId: target.id,
+                nickname: peer?.nickname,
+              },
+            });
+          }}
+        />
+      </Sheet>
     </>
   );
 }
 
-function MessageBubble({ message, mine }: { message: Message; mine: boolean }) {
+function MessageBubble({
+  message,
+  mine,
+  onReport,
+}: {
+  message: Message;
+  mine: boolean;
+  onReport: (message: Message) => void;
+}) {
   const { colors } = useTheme();
 
   if (message.type === 'SYSTEM') {
@@ -401,7 +442,17 @@ function MessageBubble({ message, mine }: { message: Message; mine: boolean }) {
 
   return (
     <View style={[styles.bubbleRow, mine ? styles.bubbleRowMine : null]}>
-      <View
+      {/*
+        Long-press reports *this message*. Reporting the person was already
+        possible from the header, but guideline 1.2 asks for a way to flag the
+        objectionable content itself — and a moderator needs to know which
+        message. Only the peer's messages: reporting your own is meaningless.
+      */}
+      <Pressable
+        onLongPress={mine ? undefined : () => onReport(message)}
+        delayLongPress={350}
+        accessibilityRole={mine ? undefined : 'button'}
+        accessibilityLabel={mine ? undefined : copy.safety.reportMessage}
         style={[
           styles.bubble,
           mine
@@ -415,7 +466,7 @@ function MessageBubble({ message, mine }: { message: Message; mine: boolean }) {
         <Text variant="body" tone={mine ? 'onAccent' : 'default'}>
           {message.content}
         </Text>
-      </View>
+      </Pressable>
       <Text variant="micro" tone="tertiary" style={styles.time}>
         {formatClock(message.createdAt)}
       </Text>
@@ -484,4 +535,5 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   menuSecondary: { marginTop: spacing.xs },
+  reportPreview: { marginBottom: spacing.base },
 });

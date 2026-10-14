@@ -383,6 +383,8 @@ export const en: CopyBundle = {
     reportTitle: 'What went wrong?',
     reportDetailPlaceholder: 'Any details help us look into it. (Optional)',
     reportAlsoBlock: 'Block this person too',
+    reportPost: 'Report this post',
+    reportMessage: 'Report this message',
     reportSubmit: 'Send report',
     reportDone: "Report received. We'll look into it and take action.",
     reportReasons: {
