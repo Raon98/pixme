@@ -76,7 +76,7 @@ class OpenAiLiveVerificationManualCheck {
         System.out.println("Measured spec: " + spec);
 
         // --- User test photo (Image A) ---
-        Path userPhotoPath = Path.of("/tmp/pixme-test-input.jpg");
+        Path userPhotoPath = Path.of(envOr("PIXME_VERIFY_INPUT", "/tmp/pixme-test-input.jpg"));
         assertThat(Files.exists(userPhotoPath))
                 .as("Test user photo must exist at " + userPhotoPath)
                 .isTrue();
@@ -103,12 +103,18 @@ class OpenAiLiveVerificationManualCheck {
                 "Asia/Seoul", "1.0.0", null, null, null, aiConfig,
                 null, null, null, null, null, null, null, null, null);
 
+        // Style is overridable so the same photo can be run through a second
+        // style without editing this file — the only honest way to show a
+        // before/after where the clothes really are unchanged.
+        PixelStyle style = PixelStyle.valueOf(envOr("PIXME_VERIFY_STYLE", "PIXME_BASIC"));
+        System.out.println("Style: " + style);
+
         PromptLibrary prompts = new PromptLibrary();
         OpenAiImageProvider provider = new OpenAiImageProvider(properties, prompts, new ObjectMapper());
 
         // Confirm PIXME_CHARACTER_V1 is what actually builds the request prompt.
         String promptPreview = prompts.characterPrompt(
-                ImageAnalysis.noPerson(), PixelStyle.PIXME_BASIC, spec, true);
+                ImageAnalysis.noPerson(), style, spec, true);
         System.out.println("Prompt version in use: " + PromptLibrary.VERSION);
         System.out.println("Prompt preview (first 200 chars): "
                 + promptPreview.substring(0, Math.min(200, promptPreview.length())));
@@ -121,7 +127,7 @@ class OpenAiLiveVerificationManualCheck {
                 masterReference,
                 "image/png",
                 spec,
-                PixelStyle.PIXME_BASIC,
+                style,
                 null, // force a real vision analysis pass, exactly like production
                 PromptLibrary.VERSION,
                 System.nanoTime());
@@ -142,7 +148,8 @@ class OpenAiLiveVerificationManualCheck {
 
         Path outputDir = Path.of("tmp");
         Files.createDirectories(outputDir);
-        Path outputPath = outputDir.resolve("pixme-api-verification.png");
+        Path outputPath = Path.of(
+                envOr("PIXME_VERIFY_OUTPUT", outputDir.resolve("pixme-api-verification.png").toString()));
         Files.write(outputPath, result.image());
 
         System.out.println("OpenAI API: OK");

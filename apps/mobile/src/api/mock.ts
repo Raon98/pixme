@@ -11,7 +11,8 @@
  * the App Review account (ahdzz11@naver.com) and 민주
  * (cheer997979@naver.com). Deliberately not a crowd of invented names: an
  * invented crowd made the square look busier than it will be on launch day,
- * and reusing one render across two names showed the same face twice.
+ * and reusing one render across two names showed the same face twice. The one
+ * exception is `MOCK_PROMO`, an explicit per-run flag for ad capture.
  *
  * <p>State lives in module-level variables and resets on reload. That is
  * deliberate: this is a preview tool, not a persistence layer.
@@ -21,8 +22,10 @@ import {
   MOCK_AHDZZ_URIS,
   MOCK_CHARACTER_URI,
   MOCK_CHEOL_URI,
+  MOCK_CHEOL_Y2K_URI,
   MOCK_GENERATED_URIS,
   MOCK_MINJU_URI,
+  MOCK_PROMO,
 } from '@/lib/mock';
 
 import { ApiError, ApiErrorCode } from './errors';
@@ -315,9 +318,11 @@ function pollGeneration(id: string): MockGeneration {
     // A different render each time — see MOCK_GENERATED_URIS. Reusing one
     // image made every result identical to today's published character, and
     // the result screen correctly but uselessly reported it as already kept.
-    generation.characterImageUrl =
-      MOCK_GENERATED_URIS[generationsCompleted % MOCK_GENERATED_URIS.length] ??
-      MOCK_CHARACTER_URI;
+    generation.characterImageUrl = MOCK_PROMO
+      ? MOCK_CHEOL_Y2K_URI
+      : MOCK_GENERATED_URIS[
+          generationsCompleted % MOCK_GENERATED_URIS.length
+        ] ?? MOCK_CHARACTER_URI;
     generationsCompleted += 1;
     generation.completedAt = isoNow();
     // Mirrors NotificationService.onGenerationCompleted. The id has to travel
@@ -513,8 +518,24 @@ if (pastCharacterUri) {
 
 settings.squareVisible = true;
 settings.squareOnboarded = true;
-entitlements.firstGenerationAvailable = false;
+// The seeded account already made today's PIXME, so its free first run is
+// spent. Promo capture is shooting the first-run path the ad actually
+// promises ("첫 PIXME는 무료"), so there it stays available.
+entitlements.firstGenerationAvailable = MOCK_PROMO;
 entitlements.firstRetryAvailable = true;
+if (MOCK_PROMO) {
+  // Shooting the styles as a feature, not as a paywall: every chip in the
+  // capture is pickable, so the selected one matches the render that comes
+  // back instead of showing a lock over the style the ad just used.
+  entitlements.unlockedStyles = [
+    'Y2K_PIXEL',
+    'BIT_16',
+    'RETRO_PC',
+    'ARCADE',
+    'MINI_PIXEL',
+    'SOFT_PIXEL',
+  ];
+}
 refreshNextGenerationIsFree();
 
 /* --------------------------------------------------------------- square --- */
@@ -542,6 +563,9 @@ function mulberry32(seed: number): () => number {
 const PLACEMENT_SEED = 20261010;
 const CANDIDATES_PER_POINT = 12;
 const MARGIN_RATIO = 0.1;
+
+/** Mirrors `SquareCanvas.FEET_TOP` — nobody stands above the skyline. */
+const FEET_TOP_RATIO = 0.38;
 
 /**
  * Every prop's coordinate, fed in as already-taken points so a person can
@@ -575,8 +599,9 @@ let random = mulberry32(PLACEMENT_SEED);
 function placeInCanvas(): { x: number; y: number } {
   const marginX = CANVAS.width * MARGIN_RATIO;
   const marginY = CANVAS.height * MARGIN_RATIO;
+  const feetTop = CANVAS.height * FEET_TOP_RATIO;
   const usableWidth = CANVAS.width - marginX * 2;
-  const usableHeight = CANVAS.height - marginY * 2;
+  const usableHeight = CANVAS.height - marginY - feetTop;
 
   let best = { x: CANVAS.width / 2, y: CANVAS.height / 2 };
   let bestDistance = -1;
@@ -584,7 +609,7 @@ function placeInCanvas(): { x: number; y: number } {
   for (let attempt = 0; attempt < CANDIDATES_PER_POINT; attempt += 1) {
     const candidate = {
       x: marginX + random() * usableWidth,
-      y: marginY + random() * usableHeight,
+      y: feetTop + random() * usableHeight,
     };
     let nearest = Infinity;
     for (const point of placedPoints) {
@@ -603,6 +628,26 @@ function placeInCanvas(): { x: number; y: number } {
 
   placedPoints.push(best);
   return best;
+}
+
+/**
+ * A loose arc in front of the fountain, used only under {@link MOCK_PROMO}.
+ *
+ * <p>Best-candidate sampling deliberately pushes people as far apart as it
+ * can, which is right for a square that fills up and wrong for a photograph
+ * of one that hasn't. Three scattered dots across a wide canvas read as an
+ * empty plaza; the same three standing together read as a place people go.
+ */
+const PROMO_POSITIONS = [
+  { x: 340, y: 1080 },
+  { x: 545, y: 660 },
+  { x: 760, y: 920 },
+];
+
+function depthFor(y: number): number {
+  const feetTop = CANVAS.height * FEET_TOP_RATIO;
+  const band = Math.max(1, CANVAS.height - feetTop);
+  return Math.min(4, Math.max(0, Math.round((1 - (y - feetTop) / band) * 4)));
 }
 
 const squareScene: SquareResponse['scene'] = {
@@ -1095,7 +1140,9 @@ export const mockSquareApi = {
       .map((person, index) => {
         const statusId = todayStatusByPerson.get(person.id);
         const status = statusId ? dailyStatuses.get(statusId) ?? null : null;
-        const { x, y } = placeInCanvas();
+        const { x, y } = MOCK_PROMO
+          ? PROMO_POSITIONS[index] ?? placeInCanvas()
+          : placeInCanvas();
         return {
           userId: person.id,
           dailyStatusId: status?.id ?? null,
@@ -1107,8 +1154,9 @@ export const mockSquareApi = {
           x,
           y,
           idleVariant: index % 3,
-          // Same rule the server uses: higher up the canvas reads as further back.
-          depth: Math.min(4, Math.max(0, Math.round((1 - y / CANVAS.height) * 4))),
+          // Same rule the server uses: further back on the ground reads as
+          // further away, normalised over the walkable band.
+          depth: depthFor(y),
         };
       })
       // Painter's order, as the server returns it: back row drawn first.

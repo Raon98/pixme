@@ -18,6 +18,13 @@ export const SCENE = {
 
 export const TOTAL = SCENE.outro.to;
 
+/**
+ * 씬 컴포넌트는 <Sequence> 안에서 돌므로 useCurrentFrame()이 "씬-로컬"이다.
+ * 아래 CUE는 전부 절대 프레임(오디오용) — 씬 안에서는 이 함수로 변환해 쓴다.
+ * 첫 렌더에서 모든 씬이 통째로 비어 보였던 원인이 바로 이 변환 누락이었다.
+ */
+export const local = (absolute: number, scene: { from: number }) => absolute - scene.from;
+
 /** 사운드 큐 — 이름은 public/audio/*.wav 파일명과 1:1. */
 export const CUE = {
   shutter: 18,
@@ -25,9 +32,8 @@ export const CUE = {
   heroPop: 92,
 
   makeWhoosh: SCENE.make.from,
-  tapPreview: 205,
-  tapGenerate: 258,
-  resultSuccess: 330,
+  tapGenerate: 246,
+  resultSuccess: 320,
 
   squareWhoosh: SCENE.square.from,
   squarePop: 432,

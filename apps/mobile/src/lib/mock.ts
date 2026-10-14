@@ -81,6 +81,11 @@ const AHDZZ = [
 const MINJU = resolveAsset(
   require('../../assets/mock/generated-character-minju.png'),
 );
+
+/** 성철's Y2K-style run of the same source photo — see {@link MOCK_PROMO}. */
+const CHEOL_Y2K = resolveAsset(
+  require('../../assets/mock/generated-character-cheol-y2k.png'),
+);
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /** 나 — cheol1998@kakao.com. */
@@ -95,6 +100,22 @@ export const MOCK_MINJU_URI: string = MINJU ?? BLANK_PIXEL;
 
 /** Fallback for call sites that only need *some* character. */
 export const MOCK_CHARACTER_URI = MOCK_CHEOL_URI;
+
+/**
+ * Dresses the preview for promo capture:
+ * `EXPO_PUBLIC_PIXME_MOCK=1 EXPO_PUBLIC_PIXME_MOCK_PROMO=1`.
+ *
+ * <p>Two effects, both about what a *screenshot* has to show, and neither
+ * inventing anyone: the same three real accounts stand together in front of
+ * the fountain instead of spread to the canvas edges, and generation returns
+ * {@link MOCK_CHEOL_Y2K_URI} — the real run of the same photo the ad opens on
+ * — so the result screen shows the character the viewer just watched being
+ * made rather than an unrelated render.
+ */
+export const MOCK_PROMO = process.env.EXPO_PUBLIC_PIXME_MOCK_PROMO === '1';
+
+/** 성철's Y2K render — the ad's hero, generated from `cheol-photo.jpg`. */
+export const MOCK_CHEOL_Y2K_URI: string = CHEOL_Y2K ?? BLANK_PIXEL;
 
 /**
  * Renders handed out to freshly *generated* characters, cycled per generation.

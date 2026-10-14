@@ -27,6 +27,9 @@ build/
 .gradle/
 *.class
 
+# Rendered promo video — regenerate with `npm run render:*` in apps/promo.
+apps/promo/out/
+
 # OS / IDE
 .DS_Store
 .idea/

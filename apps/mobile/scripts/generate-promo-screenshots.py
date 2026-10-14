@@ -138,8 +138,18 @@ def compose(capture_name: str, headline: list[str], sub: str,
 SHOTS = [
     ("screen-create.png", ["사진 한 장이면", "충분해요"],
      "셀카든 전신이든, 오늘 찍은 걸로", "01-create"),
-    ("screen-today.png", ["오늘의 내가", "픽셀 캐릭터로"],
-     "기분과 한마디를 함께 남겨요", "02-today"),
+    # Was the 오늘 feed, which the mock preview seeds with the viewer not
+    # having posted yet — so it never actually showed "오늘의 내가 픽셀
+    # 캐릭터로". The result screen does, and with a real generation (the
+    # same photo→character pair the promo film opens on).
+    ("screen-result.png", ["오늘의 내가", "픽셀 캐릭터로"],
+     "사진 한 장으로 완성된 오늘의 PIXME", "02-result"),
+    # Re-captured after the square fix this session: characters used to be
+    # placeable above the horizon (floating in the sky) when the allocator's
+    # vertical band didn't account for a character being drawn upward from
+    # its feet. This capture also gathers the cast near the fountain instead
+    # of scattered to the canvas edges — a near-empty square read as empty
+    # rather than "a place people go".
     ("screen-square.png", ["지금 접속한 사람들이", "모이는 광장"],
      "캐릭터를 눌러 오늘의 한마디를 보세요", "03-square"),
     # The conversation *list* is deliberately not in the set: with one thread

@@ -2,7 +2,7 @@ import React from 'react';
 import { AbsoluteFill, Audio, Sequence, interpolate, staticFile, useCurrentFrame } from 'remotion';
 
 import { CUE, SCENE, TOTAL } from './lib/timeline';
-import { useFonts } from './lib/ui';
+import { Backdrop, PixelWipe, useFonts } from './lib/ui';
 import { Hook } from './scenes/Hook';
 import { Make } from './scenes/Make';
 import { Square } from './scenes/Square';
@@ -34,8 +34,15 @@ export const PromoVideo: React.FC = () => {
     durationInFrames: SCENE[k].to - SCENE[k].from,
   });
 
+  /** 컷을 가리는 픽셀 전환. 경계 프레임을 한가운데 두고 양쪽으로 걸친다. */
+  const WIPE = 22;
+  const wipeAt = (k: keyof typeof SCENE) => SCENE[k].from - WIPE / 2;
+
   return (
     <AbsoluteFill style={{ background: '#FBF7EF' }}>
+      {/* 40초 내내 끊기지 않는 배경. 씬 바깥에 둬야 컷마다 되감기지 않는다. */}
+      <Backdrop />
+
       <Sequence {...span('hook')}>
         <Hook />
       </Sequence>
@@ -55,6 +62,12 @@ export const PromoVideo: React.FC = () => {
         <Outro />
       </Sequence>
 
+      {(['make', 'square', 'connect', 'styles', 'outro'] as const).map((k) => (
+        <Sequence key={k} from={wipeAt(k)} durationInFrames={WIPE}>
+          <PixelWipe />
+        </Sequence>
+      ))}
+
       {/* ---------------- 사운드: 타임라인 큐와 1:1 ---------------- */}
       <Bgm />
       <Sfx at={CUE.shutter} file="shutter" />
@@ -62,7 +75,6 @@ export const PromoVideo: React.FC = () => {
       <Sfx at={CUE.heroPop} file="pop" />
 
       <Sfx at={CUE.makeWhoosh} file="whoosh" volume={0.8} />
-      <Sfx at={CUE.tapPreview} file="ui-tap" />
       <Sfx at={CUE.tapGenerate} file="ui-tap" />
       <Sfx at={CUE.resultSuccess} file="success" />
 

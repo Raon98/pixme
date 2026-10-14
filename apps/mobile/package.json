@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "jest --passWithNoTests",
     "web:preview": "EXPO_PUBLIC_PIXME_MOCK=1 expo start --web",
+    "web:promo": "EXPO_PUBLIC_PIXME_MOCK=1 EXPO_PUBLIC_PIXME_MOCK_PROMO=1 expo start --web",
     "preview": "EXPO_PUBLIC_PIXME_MOCK=1 expo start"
   },
   "dependencies": {
