@@ -11,9 +11,12 @@ import { formatCount, formatRelative } from '@/lib/format';
 import { layout, opacity, radius, spacing, useTheme } from '@/theme';
 import {
   Avatar,
+  Button,
   HeartBurst,
   Icon,
+  IconButton,
   PixelCharacter,
+  Sheet,
   Text,
   useToast,
 } from '@/ui';
@@ -93,6 +96,7 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
   }, [status, toggleHeart, toast]);
 
   const [composingWave, setComposingWave] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const onWave = useCallback(() => {
     if (waveSent) {
@@ -201,6 +205,24 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
           ) : null}
         </Pressable>
 
+        {/*
+          Reporting lives on the card itself, not only behind the author's
+          profile. This is where someone actually encounters a post they want
+          to flag, and a user-level report cannot say which post was the
+          problem. Kept outside the header Pressable so it does not compete
+          with "open profile".
+        */}
+        <View style={styles.overflow}>
+          <IconButton
+            label={copy.safety.reportPost}
+            variant="plain"
+            size={32}
+            onPress={() => setMenuOpen(true)}
+          >
+            <Icon name="more" size={18} color={colors.textTertiary} />
+          </IconButton>
+        </View>
+
         {/* character stage */}
         <View style={styles.characterArea}>
           <PixelCharacter
@@ -290,6 +312,29 @@ export function FeedCard({ status, height, active }: FeedCardProps) {
         onDismiss={connectionRequest.dismissQuotaDialog}
       />
 
+      <Sheet
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        title={`@${status.author.nickname}`}
+      >
+        <Button
+          label={copy.safety.reportPost}
+          variant="secondary"
+          icon={<Icon name="flag" size={18} color={colors.text} />}
+          onPress={() => {
+            setMenuOpen(false);
+            router.push({
+              pathname: '/report',
+              params: {
+                targetType: 'DAILY_STATUS',
+                targetId: status.id,
+                nickname: status.author.nickname,
+              },
+            });
+          }}
+        />
+      </Sheet>
+
       <WaveComposeDialog
         visible={composingWave}
         loading={connectionRequest.isPending}
@@ -356,7 +401,21 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 10,
   },
-  header: { flexDirection: 'row', alignItems: 'center' },
+  // Absolute so it sits above the header Pressable's hit area instead of
+  // inside it.
+  overflow: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    zIndex: 5,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    // Clears the absolutely-positioned overflow button so the heart count
+    // is not painted underneath it.
+    paddingRight: 36,
+  },
   headerText: { flex: 1, marginLeft: spacing.md },
   heartCount: { flexDirection: 'row', alignItems: 'center' },
   heartCountText: { marginLeft: spacing.xs },
